@@ -118,6 +118,7 @@ function AppInner() {
   const [items, setItems] = useState<FeedbackVm[]>([])
   const [autoReplying, setAutoReplying] = useState(false)
   const [autoReplyProgress, setAutoReplyProgress] = useState<{ done: number; total: number } | null>(null)
+  const [storeMenuOpen, setStoreMenuOpen] = useState(false)
   const [autoPanelOpen, setAutoPanelOpen] = useState(false)
 
   const [autoRules, setAutoRules] = useState<AutoReplyRule[]>(() => {
@@ -408,6 +409,22 @@ function AppInner() {
           try {
             window.dispatchEvent(new CustomEvent('wb:answered', { detail: { id: dto.id } }))
           } catch {}
+          setItems((prev) =>
+            prev.map((item) =>
+              item.dto.id === dto.id
+                ? {
+                    ...item,
+                    answerDraft: text,
+                    lastSentAnswer: text,
+                    sendStatus: { kind: 'sent' },
+                    dto: {
+                      ...item.dto,
+                      answer: { text, state: item.dto.answer?.state ?? 'wbRu', editable: item.dto.answer?.editable ?? false },
+                    },
+                  }
+                : item,
+            ),
+          )
           done += 1
           setAutoReplyProgress({ done, total: targets.length })
         } catch (e) {
@@ -448,26 +465,64 @@ function AppInner() {
 
       <div className="header">
         <div className="brand">
-          <h1>WB Seller Tools</h1>
-          <span className="badge">local</span>
+          <div className="brandTop">
+            <h1>WB Seller Tools</h1>
+            <span className="badge brandBadge">Royal Charms</span>
+          </div>
+          <div className="brandSub">
+            <span className="brandTyping">расширение для Wildberries</span>
+            <span className="brandCursor">▍</span>
+          </div>
+          <div className="brandStory">
+            <span className="brandWb">WB</span>
+            <span className="brandRunner">🧍‍♂️👜</span>
+            <span className="brandHome">🏠</span>
+          </div>
         </div>
 
-        <div className="row" style={{ gap: 8 }}>
-          <select
-            className="select"
-            value={activeAccount?.id ?? ''}
-            onChange={(e) => {
-              const id = e.target.value
-              setActiveId(id)
-              setActiveAccountId(id)
-            }}
-          >
-            {accounts.map((a: WbAccount) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </select>
+        <div className="headerTop">
+          <div style={{ position: 'relative' }}>
+            <button
+              className="btn storeButton"
+              onClick={() => {
+                if (accounts.length === 0) {
+                  setApiModalOpen(true)
+                  return
+                }
+                setStoreMenuOpen((v) => !v)
+              }}
+            >
+              {activeAccount?.name ?? '+'}
+            </button>
+            {storeMenuOpen && (
+              <div className="popover storeMenu" onMouseLeave={() => setStoreMenuOpen(false)}>
+                <div className="small muted" style={{ marginBottom: 8 }}>Магазины</div>
+                <div className="storeList">
+                  {accounts.map((a: WbAccount) => (
+                    <button
+                      key={a.id}
+                      className={`btn storeOption ${activeAccount?.id === a.id ? 'isActive' : ''}`}
+                      onClick={() => {
+                        setActiveId(a.id)
+                        setActiveAccountId(a.id)
+                        setStoreMenuOpen(false)
+                      }}
+                    >
+                      {a.name}
+                    </button>
+                  ))}
+                </div>
+                <div className="storeMenuActions">
+                  <button className="btn" onClick={() => { setApiModalOpen(true); setStoreMenuOpen(false) }}>
+                    API токены магазина
+                  </button>
+                  <button className="btn storeAdd" onClick={() => { setApiModalOpen(true); setStoreMenuOpen(false) }}>
+                    +
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
           <button className="btn" onClick={() => setApiModalOpen(true)}>
             API токены
@@ -499,7 +554,9 @@ function AppInner() {
               </div>
             )}
           </div>
+        </div>
 
+        <div className="headerNav">
           <button className={tab === 'reviews' ? 'btn primary' : 'btn'} onClick={() => setTab('reviews')}>
             Отзывы
           </button>

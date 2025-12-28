@@ -1,0 +1,656 @@
+:root {
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  line-height: 1.4;
+  font-weight: 400;
+  color: #111;
+  background: #ffd400;
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; background: #ffd400; }
+
+a { color: inherit; }
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.brand {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.brand h1 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.badge {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid rgba(0,0,0,0.08);
+}
+
+.badge.ok {
+  background: #e8fff3;
+  border-color: #b7f0d0;
+  color: #0f6b3d;
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  /* Важно для CSS Grid: разрешаем элементу сжиматься,
+     иначе большие таблицы расширяют колонку и "заезжают" на соседние блоки */
+  min-width: 0;
+}
+
+.btn {
+  border: 1px solid rgba(0,0,0,0.15);
+  background: #fff;
+  padding: 8px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.btn.primary {
+  background: #111;
+  color: #fff;
+  border-color: #111;
+}
+
+/* ---- top filter bar (черная плашка) ---- */
+.filtersBar {
+  background: #111;
+  color: #fff;
+  border: 1px solid #000;
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.filtersBar .input,
+.filtersBar .select {
+  background: #0b0b0b;
+  color: #fff;
+  border-color: rgba(255,255,255,0.28);
+}
+
+.filtersLabel {
+  font-weight: 800;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+}
+
+.filtersBar .btn {
+  background: #0b0b0b;
+  color: #fff;
+  border-color: rgba(255,255,255,0.35);
+}
+
+.filtersBar .btn.primary {
+  background: #ffd400;
+  color: #000;
+  border-color: #ffd400;
+}
+
+/* ---- Review cards: рандомные палитры ---- */
+.reviewCard--black {
+  background: #111;
+  color: #fff;
+  border-color: #000;
+}
+.reviewCard--black .muted { color: rgba(255,255,255,0.72); }
+.reviewCard--black .small { color: rgba(255,255,255,0.78); }
+
+.reviewCard--yellow {
+  background: #ffd400;
+  color: #000;
+  border: 2px solid #000;
+}
+
+.reviewCard--white {
+  background: #fff;
+  color: #000;
+  border-color: #000;
+}
+
+/* ---- Modal / Popover ---- */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 18px;
+}
+
+.modal {
+  width: min(1100px, 96vw);
+  max-height: 92vh;
+  overflow: auto;
+  background: #fff;
+  border: 2px solid #000;
+  border-radius: 16px;
+  padding: 14px;
+}
+
+.modalHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background: #fff;
+  border: 2px solid #000;
+  border-radius: 12px;
+  padding: 12px;
+  z-index: 40;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+}
+
+/* ---- Campaign list ---- */
+.list { display: flex; flex-direction: column; gap: 8px; }
+
+.campaignRow {
+  border: 1px solid rgba(0,0,0,0.18);
+  border-radius: 10px;
+  padding: 10px;
+  cursor: pointer;
+  background: #fff;
+}
+
+.campaignRow.isSelected {
+  border: 2px solid #000;
+  background: #fff7c2;
+}
+
+/* ---- Ads calendar ---- */
+.adsCalendar { user-select: none; }
+
+.adsCalendarGrid {
+  display: grid;
+  grid-template-columns: 46px repeat(24, 1fr);
+  gap: 2px;
+}
+
+.adsCalendarCorner { height: 26px; }
+
+.adsCalendarHour {
+  height: 26px;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border: 1px solid rgba(0,0,0,0.18);
+  border-radius: 6px;
+}
+
+.adsCalendarHour.isCurrentHour { border: 2px solid #000; }
+
+.adsCalendarDay {
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  background: #fff;
+  border: 1px solid rgba(0,0,0,0.18);
+  border-radius: 6px;
+}
+
+.adsCalendarDay.isToday { border: 2px solid #000; }
+
+.adsCell {
+  height: 18px;
+  border: 1px solid rgba(0,0,0,0.14);
+  border-radius: 4px;
+  background: #fff;
+}
+
+.adsCell.isOn { background: #111; }
+.adsCell.isNow { outline: 2px solid #ffd400; }
+
+.badgeOn { background: #111; color: #fff; border-color: #000; }
+.badgeOff { background: #fff; color: #000; border-color: #000; }
+
+.input, .select, .textarea {
+  border: 1px solid rgba(0,0,0,0.15);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 14px;
+  background: #fff;
+}
+
+.input { width: min(520px, 90vw); }
+.textarea { width: 100%; min-height: 80px; resize: vertical; }
+
+.small {
+  font-size: 12px;
+  color: #555;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.summaryColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Сводка должна быть компактной и не растягиваться на всю ширину колонки */
+.summaryCard {
+  justify-self: start;
+  width: fit-content;
+  max-width: 360px;
+}
+
+@media (min-width: 900px) {
+  .grid { grid-template-columns: 360px 1fr; }
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.accessPanel {
+  margin-top: 12px;
+  background: #fafafa;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.accessRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px dashed rgba(0,0,0,0.08);
+}
+
+.accessRow:last-child {
+  border-bottom: none;
+}
+
+.ue-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.ue-table--compact th,
+.ue-table--compact td {
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+.ue-table--compact thead th {
+  position: static;
+}
+
+.ue-table--compact thead tr:nth-child(2) th {
+  top: auto;
+}
+
+.devConsole {
+  max-width: 480px;
+}
+
+.devConsoleResponse {
+  background: #f8f9fb;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.devConsoleGrid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr;
+  margin-top: 10px;
+}
+
+.devConsoleGrid pre {
+  background: #fff;
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 8px;
+  padding: 8px;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 12px;
+}
+
+.devConsoleHistoryItem {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  text-align: left;
+  border: 1px dashed rgba(0,0,0,0.15);
+  background: #fff;
+  border-radius: 8px;
+  padding: 8px;
+  cursor: pointer;
+}
+
+.feedbackHeader {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.muted { color: #666; }
+
+.star {
+  font-size: 14px;
+}
+
+.kv {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.kv > span {
+  font-size: 12px;
+  color: #444;
+  background: #f1f2f6;
+  border-radius: 999px;
+  padding: 4px 8px;
+}
+
+.answerStatus {
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.toastWrap {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 9999;
+}
+
+.toast {
+  background: #111;
+  color: #fff;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+  max-width: 420px;
+}
+
+.error {
+  color: #b00020;
+}
+
+
+
+
+/* =======================
+   Unit экономика
+   ======================= */
+
+.ue-card { border: 2px solid #000; }
+
+.ue-panels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+@media (max-width: 980px) {
+  .ue-panels { grid-template-columns: 1fr; }
+}
+
+.ue-panel {
+  border: 2px solid #000;
+  border-radius: 16px;
+  padding: 12px;
+  background: #fff;
+}
+
+.ue-panel-title {
+  font-weight: 900;
+  margin-bottom: 8px;
+}
+
+.ue-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.ue-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.ue-form input {
+  border: 2px solid #000;
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: #fff;
+  color: #000;
+  font-weight: 700;
+}
+
+.ue-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(160px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+@media (max-width: 980px) {
+  .ue-kpis { grid-template-columns: repeat(2, minmax(160px, 1fr)); }
+}
+
+.ue-kpi {
+  border: 2px solid #000;
+  border-radius: 16px;
+  padding: 10px;
+  background: #fff;
+}
+
+.ue-tableWrap {
+  margin-top: 10px;
+  overflow: auto;
+  max-width: 100%;
+  min-width: 0;
+  border: 2px solid #000;
+  border-radius: 16px;
+  background: #fff;
+  position: relative;
+  isolation: isolate;
+}
+
+.ue-table {
+  border-collapse: collapse;
+  min-width: 1600px;
+  width: max-content;
+  table-layout: fixed;
+}
+
+.ue-table th, .ue-table td {
+  border: 1px solid rgba(0,0,0,0.25);
+  padding: 6px 8px;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.ue-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #0b0b0b;
+  color: #fff;
+  font-weight: 900;
+}
+
+.ue-table thead tr:nth-child(2) th {
+  top: 34px; /* высота первой строки заголовка */
+  z-index: 3;
+  font-weight: 800;
+}
+
+.ue-table tbody {
+  position: relative;
+  z-index: 1;
+}
+
+.ue-table tbody tr:nth-child(1) td {
+  background: rgba(255, 230, 0, 0.25);
+  font-size: 11px;
+  white-space: normal;
+  min-width: 120px;
+}
+
+.ue-table input {
+  width: 140px;
+  border: 2px solid #000;
+  border-radius: 10px;
+  padding: 6px 8px;
+  font-weight: 700;
+  background: #fff;
+  color: #000;
+}
+
+.ue-table td.ue-ro {
+  background: rgba(0,0,0,0.03);
+  font-weight: 800;
+}
+
+.ue-spacer {
+  background: #ffea00 !important;
+  border-left: 2px solid #000 !important;
+  border-right: 2px solid #000 !important;
+  min-width: 14px;
+  width: 14px;
+}
+
+.ue-id {
+  min-width: 60px;
+  font-weight: 900;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.ue-del {
+  border: 1px solid rgba(0,0,0,0.3);
+  background: #fff;
+  border-radius: 10px;
+  width: 22px;
+  height: 22px;
+  line-height: 18px;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+/* --- Splash screen --- */
+.splashRoot {
+  position: fixed;
+  inset: 0;
+  background: #ffdd00;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.splashCenter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+
+.splashTitle {
+  color: #000;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  font-size: 54px;
+  text-transform: uppercase;
+}
+
+.splashSub {
+  color: #000;
+  font-weight: 800;
+  font-size: 22px;
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 380ms ease, transform 380ms ease;
+  min-height: 28px;
+}
+
+.splashSub.isShown {
+  opacity: 1;
+  transform: translateY(0px);
+}
+
+.splashCursor {
+  display: inline-block;
+  margin-left: 4px;
+  animation: splashBlink 900ms steps(1) infinite;
+}
+
+@keyframes splashBlink {
+  0%, 45% { opacity: 1; }
+  46%, 100% { opacity: 0; }
+}

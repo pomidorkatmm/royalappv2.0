@@ -35,6 +35,7 @@ export default function AbTestsPage({
   const [productsHasMore, setProductsHasMore] = useState(false)
   const [productQuery, setProductQuery] = useState('')
   const [selectedProduct, setSelectedProduct] = useState<CardShort | null>(null)
+  const [testName, setTestName] = useState('')
 
   const didInitialProductsLoad = useRef(false)
 
@@ -61,8 +62,13 @@ export default function AbTestsPage({
     const t = loadAbTests().find((x) => x.status === 'running')
     return t?.id ?? null
   })
+  const [selectedTestId, setSelectedTestId] = useState<string | null>(() => {
+    const t = loadAbTests().find((x) => x.status === 'running') ?? loadAbTests()[0]
+    return t?.id ?? null
+  })
 
   const activeTest = useMemo(() => tests.find((t) => t.id === activeId) ?? null, [tests, activeId])
+  const selectedTest = useMemo(() => tests.find((t) => t.id === selectedTestId) ?? null, [tests, selectedTestId])
 
   // обновляем локально сохранённые тесты
   useEffect(() => {
@@ -70,7 +76,25 @@ export default function AbTestsPage({
     // (через upsert мы уже сохраняем; здесь просто синхронизируем UI)
   }, [tests])
 
+  useEffect(() => {
+    if (selectedTestId && tests.some((t) => t.id === selectedTestId)) return
+    const fallback = tests.find((t) => t.status === 'running') ?? tests[0] ?? null
+    setSelectedTestId(fallback?.id ?? null)
+  }, [tests, selectedTestId])
+
   const intervalRef = useRef<number | null>(null)
+
+  function ensureTestName(): string {
+    const trimmed = testName.trim()
+    if (trimmed) return trimmed
+    const fallback = selectedProduct?.vendorCode ?? (Number.isFinite(nmId) ? String(nmId) : '')
+    return fallback ? `A/B тест ${fallback}` : 'A/B тест'
+  }
+
+  function isPriceAlreadySetError(e: any) {
+    const msg = String(e?.detail ?? e?.message ?? e)
+    return msg.includes('prices and discounts are already set')
+  }
 
   async function loadProductsPage(reset: boolean) {
     setProductsLoading(true)
@@ -143,6 +167,7 @@ export default function AbTestsPage({
     setPhotoVariants([])
     setBaselinePrice(null)
     setPriceVariants([0, 0])
+    setTestName(p.vendorCode ? `A/B тест ${p.vendorCode}` : `A/B тест ${p.nmId}`)
   }
 
   async function loadCampaigns() {
@@ -190,7 +215,7 @@ export default function AbTestsPage({
   }
 
   const campaignsForUi = useMemo(() => {
-    return campaigns
+    const base = campaigns
       .map((c) => {
         const id = Number(c?.advertId ?? c?.id)
         const name = String(c?.name ?? c?.settings?.name ?? `Кампания ${id}`)
@@ -200,7 +225,10 @@ export default function AbTestsPage({
         return { raw: c, id, name, status, payment, hasNm }
       })
       .filter((x) => Number.isFinite(x.id))
-  }, [campaigns, nmId])
+
+    if (!selectedProduct || !Number.isFinite(nmId)) return base
+    return base.filter((c) => c.hasNm)
+  }, [campaigns, nmId, selectedProduct])
 
   async function preparePhotos(files: FileList | null) {
     if (!files || files.length < 2) {
@@ -335,6 +363,7 @@ export default function AbTestsPage({
     const test: AbTest = {
       id: testId,
       createdAt: new Date().toISOString(),
+      name: ensureTestName(),
       nmId: actualNmId,
       type,
       slotMinutes,
@@ -353,8 +382,12 @@ export default function AbTestsPage({
     try {
       await applyVariant(sellerToken, test, variants[0], openApiStrategyId)
     } catch (e: any) {
-      push(`Не удалось применить вариант: ${String(e?.detail ?? e?.message ?? e)}`)
-      return
+      if (type === 'price' && isPriceAlreadySetError(e)) {
+        push('Вариант цены уже установлен, продолжаем тест')
+      } else {
+        push(`Не удалось применить вариант: ${String(e?.detail ?? e?.message ?? e)}`)
+        return
+      }
     }
 
     // берём стартовую точку метрик
@@ -370,6 +403,7 @@ export default function AbTestsPage({
     upsertAbTest(test)
     setTests(loadAbTests())
     setActiveId(test.id)
+    setSelectedTestId(test.id)
     push('A/B тест запущен')
 
     // запускаем таймер
@@ -429,8 +463,13 @@ export default function AbTestsPage({
       await applyVariant(sellerToken, current, next, openApiStrategyId)
       current.activeVariantId = next.id
     } catch (e: any) {
-      push(`Переключение варианта: ошибка ${String(e?.detail ?? e?.message ?? e)}`)
-      // не меняем activeVariantId
+      if (current.type === 'price' && isPriceAlreadySetError(e)) {
+        current.activeVariantId = next.id
+        push('Вариант цены уже установлен, переключаемся без ошибки')
+      } else {
+        push(`Переключение варианта: ошибка ${String(e?.detail ?? e?.message ?? e)}`)
+        // не меняем activeVariantId
+      }
     }
 
     upsertAbTest(current)
@@ -484,6 +523,8 @@ export default function AbTestsPage({
     return activeTest.variants.find((v) => v.id === bestId) ?? null
   }, [activeTest])
 
+  const displayTest = selectedTest ?? activeTest
+
   const filteredProducts = useMemo(() => {
     const q = productQuery.trim().toLowerCase()
     const arr = !q
@@ -494,6 +535,14 @@ export default function AbTestsPage({
         })
     return arr.slice(0, 80)
   }, [products, productQuery])
+
+  const historyItems = useMemo(() => {
+    if (!displayTest) return []
+    return displayTest.history.map((h, idx) => {
+      const variant = displayTest.variants.find((v) => v.id === h.variantId)
+      return { ...h, idx, variant }
+    })
+  }, [displayTest])
 
   return (
     <div className="grid">
@@ -538,10 +587,10 @@ export default function AbTestsPage({
           <div style={{ height: 8 }} />
 
           <input
-            className="input"
+            className="input ab-search"
             value={productQuery}
             onChange={(e) => setProductQuery(e.target.value)}
-            placeholder="Поиск по артикулу / названию / nmId"
+            placeholder="Поиск по артикулу / названию / арт. продавца"
             disabled={productsLoading}
           />
 
@@ -561,7 +610,7 @@ export default function AbTestsPage({
                   />
                   <div style={{ lineHeight: 1.2 }}>
                     <div>
-                      <b>{p.vendorCode ?? '—'}</b> · nmId: {p.nmId}
+                      <b>{p.vendorCode ?? '—'}</b> · арт. продавца: {p.nmId}
                       {p.hasPhoto === false ? <span className="badge">без фото</span> : null}
                     </div>
                     <div className="small">{p.title ?? ''}</div>
@@ -574,7 +623,7 @@ export default function AbTestsPage({
           <div className="small" style={{ marginTop: 6 }}>
             Выбрано: {selectedProduct ? (
               <>
-                <b>{selectedProduct.vendorCode ?? '—'}</b> · nmId: <b>{selectedProduct.nmId}</b>
+                <b>{selectedProduct.vendorCode ?? '—'}</b> · арт. продавца: <b>{selectedProduct.nmId}</b>
                 {selectedProduct.title ? <> · {selectedProduct.title}</> : null}
               </>
             ) : (
@@ -585,7 +634,15 @@ export default function AbTestsPage({
 
         <div style={{ height: 8 }} />
 
-        <div className="row">
+        <div className="row" style={{ flexWrap: 'wrap' }}>
+          <label className="small">Название теста</label>
+          <input
+            className="input"
+            value={testName}
+            onChange={(e) => setTestName(e.target.value)}
+            placeholder="Например: A/B тест обложки"
+            disabled={!!activeTest}
+          />
           <label className="small">Тип теста</label>
           <select className="select" value={type} onChange={(e) => setType(e.target.value as any)}>
             <option value="photo">Фото</option>
@@ -618,7 +675,7 @@ export default function AbTestsPage({
             </button>
           </div>
           {campaignsError && <div className="error">{campaignsError}</div>}
-          <div className="small">Выберите кампании, где крутится этот nmId (мы суммируем метрики по выбранным кампаниям).</div>
+          <div className="small">Выберите кампании, где крутится этот арт. продавца (мы суммируем метрики по выбранным кампаниям).</div>
 
           <div style={{ height: 8 }} />
 
@@ -640,7 +697,7 @@ export default function AbTestsPage({
                   />
                   <div>
                     <div><strong>{c.name}</strong></div>
-                    <div className="small">ID: {c.id} · status: {String(c.status)} · {String(c.payment)} {c.hasNm ? '· ✅ содержит nmId' : ''}</div>
+                    <div className="small">ID: {c.id} · status: {String(c.status)} · {String(c.payment)} {c.hasNm ? '· ✅ содержит арт. продавца' : ''}</div>
                   </div>
                 </label>
               )
@@ -743,21 +800,50 @@ export default function AbTestsPage({
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Отчёт</h2>
 
-        {activeTest ? (
+        <div className="ab-testsList">
+          {tests.map((t) => (
+            <button
+              key={t.id}
+              className={`ab-testItem ${selectedTestId === t.id ? 'is-active' : ''}`}
+              onClick={() => setSelectedTestId(t.id)}
+            >
+              <div>
+                <div style={{ fontWeight: 700 }}>{t.name || `A/B тест ${t.nmId}`}</div>
+                <div className="small muted">арт. продавца: {t.nmId} · {t.type} · {t.status === 'running' ? 'активен' : 'остановлен'}</div>
+              </div>
+              {t.status === 'running' ? <span className="badge">идёт</span> : null}
+            </button>
+          ))}
+          {tests.length === 0 && <div className="small muted">Пока нет тестов.</div>}
+        </div>
+
+        {displayTest ? (
           <>
+            <div style={{ height: 12 }} />
+
+            <div className="ab-testHeader">
+              <div>
+                <div className="h3" style={{ margin: 0 }}>{displayTest.name || `A/B тест ${displayTest.nmId}`}</div>
+                <div className="small muted">
+                  Создан: {new Date(displayTest.createdAt).toLocaleString()} · статус: {displayTest.status === 'running' ? 'активен' : 'остановлен'}
+                </div>
+              </div>
+              {displayTest.id === activeId ? <span className="badge">текущий тест</span> : null}
+            </div>
+
             <div className="kv">
-              <span>nmId: {activeTest.nmId}</span>
-              <span>тип: {activeTest.type}</span>
-              <span>интервал: {activeTest.slotMinutes} мин</span>
-              <span>кампаний: {activeTest.campaignIds.length}</span>
+              <span>арт. продавца: {displayTest.nmId}</span>
+              <span>тип: {displayTest.type}</span>
+              <span>интервал: {displayTest.slotMinutes} мин</span>
+              <span>кампаний: {displayTest.campaignIds.length}</span>
             </div>
 
             <div style={{ height: 12 }} />
 
             <div className="list">
-              {activeTest.variants.map((v) => {
-                const m = activeTest.metrics[v.id]
-                const isActive = activeTest.activeVariantId === v.id
+              {displayTest.variants.map((v) => {
+                const m = displayTest.metrics[v.id]
+                const isActive = displayTest.status === 'running' && displayTest.activeVariantId === v.id
                 return (
                   <div key={v.id} className="card" style={{ borderColor: isActive ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.08)' }}>
                     <div className="row" style={{ justifyContent: 'space-between' }}>
@@ -775,20 +861,64 @@ export default function AbTestsPage({
             <div style={{ height: 12 }} />
 
             <div className="card" style={{ background: '#fafafa' }}>
-              <strong>История переключений</strong>
-              <div className="small">На каждом шаге записывается дельта метрик, которую мы относим к текущему варианту.</div>
+              <strong>Логи теста</strong>
+              <div className="small">Фиксируем, какой вариант применяли и какие метрики получили за период.</div>
               <div style={{ height: 8 }} />
               <div style={{ maxHeight: 320, overflow: 'auto' }}>
-                {activeTest.history.slice().reverse().map((h, idx) => {
-                  const v = activeTest.variants.find((x) => x.id === h.variantId)
+                {historyItems.slice().reverse().map((h, idx) => {
+                  const v = h.variant
+                  const label = v?.label ?? h.variantId
                   return (
-                    <div key={idx} className="small" style={{ padding: '6px 0', borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
-                      {new Date(h.ts).toLocaleString()} — <strong>{v?.label ?? h.variantId}</strong> — Δ просмотры {h.delta.views}, клики {h.delta.clicks}, корзина {h.delta.atbs}, заказы {h.delta.orders}
+                    <div key={idx} className="ab-log">
+                      {v?.kind === 'photo' && v.coverUrl ? (
+                        <img src={v.coverUrl} alt={label} className="ab-thumb" />
+                      ) : (
+                        <div className="ab-thumb ab-thumb--price">₽</div>
+                      )}
+                      <div>
+                        <div style={{ fontWeight: 600 }}>{label}</div>
+                        <div className="small muted">{new Date(h.ts).toLocaleString()}</div>
+                        <div className="small">
+                          Показы: {h.delta.views} · Клики: {h.delta.clicks} · Заказы: {h.delta.orders}
+                        </div>
+                      </div>
                     </div>
                   )
                 })}
-                {activeTest.history.length === 0 && <div className="small muted">Пока нет данных.</div>}
+                {historyItems.length === 0 && <div className="small muted">Пока нет данных.</div>}
               </div>
+            </div>
+
+            <div style={{ height: 12 }} />
+
+            <div className="card" style={{ background: '#fafafa' }}>
+              <strong>График по интервалам</strong>
+              <div className="small">Каждый столбец — один тестовый промежуток, высота по показам.</div>
+              <div style={{ height: 8 }} />
+              {historyItems.length > 0 ? (
+                <div className="ab-chart">
+                  {(() => {
+                    const maxViews = Math.max(1, ...historyItems.map((h) => h.delta.views))
+                    return historyItems.map((h, i) => {
+                      const v = h.variant
+                      const heightPct = Math.max(8, Math.round((h.delta.views / maxViews) * 100))
+                      return (
+                        <div key={i} className="ab-bar">
+                          <div className="ab-barFill" style={{ height: `${heightPct}%` }} />
+                          {v?.kind === 'photo' && v.coverUrl ? (
+                            <img src={v.coverUrl} alt={v.label} className="ab-barThumb" />
+                          ) : (
+                            <div className="ab-barLabel">{v?.kind === 'price' ? `₽${v.price}` : '—'}</div>
+                          )}
+                          <div className="ab-barValue">{h.delta.views}</div>
+                        </div>
+                      )
+                    })
+                  })()}
+                </div>
+              ) : (
+                <div className="small muted">Нет данных для графика.</div>
+              )}
             </div>
           </>
         ) : (

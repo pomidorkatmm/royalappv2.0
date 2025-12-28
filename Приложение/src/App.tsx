@@ -408,6 +408,22 @@ function AppInner() {
           try {
             window.dispatchEvent(new CustomEvent('wb:answered', { detail: { id: dto.id } }))
           } catch {}
+          setItems((prev) =>
+            prev.map((item) =>
+              item.dto.id === dto.id
+                ? {
+                    ...item,
+                    answerDraft: text,
+                    lastSentAnswer: text,
+                    sendStatus: { kind: 'sent' },
+                    dto: {
+                      ...item.dto,
+                      answer: { text, state: item.dto.answer?.state ?? 'wbRu', editable: item.dto.answer?.editable ?? false },
+                    },
+                  }
+                : item,
+            ),
+          )
           done += 1
           setAutoReplyProgress({ done, total: targets.length })
         } catch (e) {

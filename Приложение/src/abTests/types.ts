@@ -28,6 +28,7 @@ export type AbVariantMetrics = AbTotals & {
 export type AbTest = {
   id: string
   createdAt: string
+  name: string
   nmId: number
   type: AbTestType
   slotMinutes: number

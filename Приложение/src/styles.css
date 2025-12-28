@@ -19,23 +19,131 @@ a { color: inherit; }
 }
 
 .header {
-  display: flex;
+  display: grid;
   gap: 12px;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
   margin-bottom: 12px;
 }
 
 .brand {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.brandTop {
   display: flex;
   gap: 10px;
   align-items: baseline;
 }
 
 .brand h1 {
-  font-size: 18px;
+  font-size: 20px;
   margin: 0;
+}
+
+.brandBadge {
+  background: #111;
+  color: #ffd400;
+  border-color: #111;
+}
+
+.brandSub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.brandTyping {
+  display: inline-block;
+  overflow: hidden;
+  white-space: nowrap;
+  width: 0;
+  border-right: 2px solid #000;
+  animation: brandTyping 96s steps(26) infinite;
+}
+
+.brandCursor {
+  animation: cursorBlink 1s steps(1) infinite;
+}
+
+.brandStory {
+  position: relative;
+  height: 24px;
+  width: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.brandWb {
+  font-weight: 900;
+  color: rgba(0,0,0,0.25);
+  font-size: 16px;
+}
+
+.brandHome {
+  font-size: 18px;
+}
+
+.brandRunner {
+  position: absolute;
+  left: 0;
+  top: 2px;
+  animation: runnerWalk 6s ease-in-out infinite alternate;
+}
+
+.headerTop {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.headerNav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.storeButton {
+  font-weight: 700;
+}
+
+.storeMenu {
+  min-width: 240px;
+}
+
+.storeList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.storeOption {
+  justify-content: flex-start;
+}
+
+.storeOption.isActive {
+  border-color: #000;
+  background: #ffd400;
+}
+
+.storeMenuActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.storeAdd {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  font-size: 20px;
+  border-radius: 12px;
 }
 
 .badge {
@@ -198,7 +306,7 @@ a { color: inherit; }
 
 .campaignRow.isSelected {
   border: 2px solid #000;
-  background: #fff7c2;
+  background: #ffd400;
 }
 
 /* ---- Ads calendar ---- */
@@ -365,7 +473,7 @@ a { color: inherit; }
 }
 
 .ab-testItem.is-yellow {
-  background: #fff7c2;
+  background: #ffd400;
 }
 
 .ab-testItem.is-black {
@@ -745,7 +853,7 @@ a { color: inherit; }
 }
 
 .ue-table tbody tr:nth-child(1) td {
-  background: rgba(255, 230, 0, 0.25);
+  background: rgba(255, 212, 0, 0.25);
   font-size: 11px;
   white-space: normal;
   min-width: 120px;
@@ -767,7 +875,7 @@ a { color: inherit; }
 }
 
 .ue-spacer {
-  background: #ffea00 !important;
+  background: #ffd400 !important;
   border-left: 2px solid #000 !important;
   border-right: 2px solid #000 !important;
   min-width: 14px;
@@ -797,7 +905,7 @@ a { color: inherit; }
 .splashRoot {
   position: fixed;
   inset: 0;
-  background: #ffdd00;
+  background: #ffd400;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -818,6 +926,55 @@ a { color: inherit; }
   letter-spacing: 0.06em;
   font-size: 54px;
   text-transform: uppercase;
+}
+
+.splashBar {
+  width: min(420px, 80vw);
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.15);
+  overflow: hidden;
+  transition: opacity 0.6s ease;
+}
+
+.splashBar.isDone {
+  opacity: 0;
+}
+
+.splashBarFill {
+  height: 100%;
+  background: #111;
+  border-radius: 999px;
+  transition: width 0.2s ease;
+}
+
+.splashMessage {
+  opacity: 0;
+  transition: opacity 0.6s ease;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+
+.splashMessage.isShown {
+  opacity: 1;
+}
+
+@keyframes brandTyping {
+  0% { width: 0; }
+  5% { width: 100%; }
+  95% { width: 100%; }
+  100% { width: 0; }
+}
+
+@keyframes cursorBlink {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
+@keyframes runnerWalk {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(180px); }
 }
 
 .splashSub {

@@ -163,19 +163,22 @@ export function UnitEconomyPage({ accountId }: Props) {
   const chinaDerived = useMemo(() => computeChinaDerived(state.china), [state.china])
   const adCostPerSale = useMemo(() => computeAdCostPerSale(state.adRate), [state.adRate])
 
-  // если себестоимость по умолчанию не задана, можно одним кликом заполнить из "Китай"
-  function applyChinaCostToAll() {
-    setState((prev) => ({
-      ...prev,
-      rows: prev.rows.map((r) => ({ ...r, costRub: chinaDerived.realCostRub })),
-    }))
-  }
-
-  function applyChinaDimsToAll() {
-    setState((prev) => ({
-      ...prev,
-      rows: prev.rows.map((r) => ({ ...r, lengthCm: prev.china.lengthCm, widthCm: prev.china.widthCm, heightCm: prev.china.heightCm })),
-    }))
+  function applyChinaToFirstEmptyRow() {
+    setState((prev) => {
+      const nextRows = prev.rows.map((r) => ({ ...r }))
+      let target = nextRows.find((r) => !String(r.article ?? '').trim())
+      if (!target) {
+        const nextId = String(nextRows.length + 1)
+        const base = nextRows[0] ?? makeDefaultUnitRows(0)[0]
+        target = { ...base, id: nextId }
+        nextRows.push(target)
+      }
+      target.lengthCm = prev.china.lengthCm
+      target.widthCm = prev.china.widthCm
+      target.heightCm = prev.china.heightCm
+      target.costRub = chinaDerived.realCostRub
+      return { ...prev, rows: nextRows }
+    })
   }
 
   function setChina<K extends keyof ChinaConfig>(key: K, value: number) {
@@ -213,10 +216,7 @@ export function UnitEconomyPage({ accountId }: Props) {
             <div className="h2">Unit экономика</div>
             <div className="small muted">Время МСК: день {now.day + 1}, час {String(now.hour).padStart(2, '0')}:00</div>
           </div>
-          <div className="row">
-            <button className="btn" onClick={applyChinaDimsToAll}>Габариты → в таблицу</button>
-            <button className="btn" onClick={applyChinaCostToAll}>СС (Китай) → в таблицу</button>
-          </div>
+          <div className="row" />
         </div>
 
         <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
@@ -233,6 +233,81 @@ export function UnitEconomyPage({ accountId }: Props) {
           <button className={activeTable === 'margin' ? 'btn primary' : 'btn'} onClick={() => setActiveTable('margin')}>Маржинальность</button>
           <button className={activeTable === 'summary' ? 'btn primary' : 'btn'} onClick={() => setActiveTable('summary')}>Сводная таблица</button>
         </div>
+
+        {activeTable === 'china' && (
+          <div className="ue-panels">
+            <div className="ue-panel">
+              <div className="ue-panel-title">Китай</div>
+              <div className="ue-form">
+                <label>Длина, см <input value={state.china.lengthCm} onChange={(e) => setChina('lengthCm', asNumber(e.target.value))} /></label>
+                <label>Ширина, см <input value={state.china.widthCm} onChange={(e) => setChina('widthCm', asNumber(e.target.value))} /></label>
+                <label>Высота, см <input value={state.china.heightCm} onChange={(e) => setChina('heightCm', asNumber(e.target.value))} /></label>
+                <label>Вес, кг <input value={state.china.weightKg} onChange={(e) => setChina('weightKg', asNumber(e.target.value))} /></label>
+                <label>Курс доллара <input value={state.china.usdRate} onChange={(e) => setChina('usdRate', asNumber(e.target.value))} /></label>
+                <label>Курс юаня <input value={state.china.cnyRate} onChange={(e) => setChina('cnyRate', asNumber(e.target.value))} /></label>
+                <label>Партия, шт <input value={state.china.batchQty} onChange={(e) => setChina('batchQty', asNumber(e.target.value))} /></label>
+                <label>СС ед., юани <input value={state.china.unitCostCny} onChange={(e) => setChina('unitCostCny', asNumber(e.target.value))} /></label>
+              </div>
+
+              <div className="ue-kpis">
+                <div className="ue-kpi">
+                  <div className="small muted">Объем, м³</div>
+                  <div className="kpi">{fmtNum(chinaDerived.volumeM3)}</div>
+                </div>
+                <div className="ue-kpi">
+                  <div className="small muted">Плотность, кг/м³</div>
+                  <div className="kpi">{fmtNum(chinaDerived.density)}</div>
+                </div>
+                <div className="ue-kpi">
+                  <div className="small muted">Логистика в РФ (J2)</div>
+                  <div className="kpi">{fmtNum(chinaDerived.logisticsRub)}</div>
+                </div>
+                <div className="ue-kpi">
+                  <div className="small muted">Реальная СС, руб. (H7)</div>
+                  <div className="kpi">{fmtNum(chinaDerived.realCostRub)}</div>
+                </div>
+              </div>
+              <div className="row" style={{ marginTop: 12 }}>
+                <button className="btn primary" onClick={applyChinaToFirstEmptyRow}>Подтвердить и перенести в таблицу</button>
+                <div className="small muted">Запишем данные в первую строку с пустым артикулом.</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTable === 'unit' && (
+          <div className="ue-panels">
+            <div className="ue-panel">
+              <div className="ue-panel-title">Рекламная ставка</div>
+              <div className="ue-form">
+                <label>Орг. место (H2) <input value={state.adRate.organicPlace} onChange={(e) => setAdRate('organicPlace', asNumber(e.target.value))} /></label>
+                <label>Цена шага (H3) <input value={state.adRate.stepPrice} onChange={(e) => setAdRate('stepPrice', asNumber(e.target.value))} /></label>
+                <label>CTR (H8) <input value={state.adRate.ctr} onChange={(e) => setAdRate('ctr', asNumber(e.target.value))} /></label>
+                <label>В корзину (I8) <input value={state.adRate.toCart} onChange={(e) => setAdRate('toCart', asNumber(e.target.value))} /></label>
+                <label>В заказ (J8) <input value={state.adRate.toOrder} onChange={(e) => setAdRate('toOrder', asNumber(e.target.value))} /></label>
+                <label>В выкуп (K8) <input value={state.adRate.toBuyout} onChange={(e) => setAdRate('toBuyout', asNumber(e.target.value))} /></label>
+              </div>
+
+              <div className="ue-kpis">
+                <div className="ue-kpi">
+                  <div className="small muted">Ставка для ТОП‑10 (H4)</div>
+                  <div className="kpi">{fmtNum((state.adRate.organicPlace - 10) * state.adRate.stepPrice)}</div>
+                </div>
+                <div className="ue-kpi">
+                  <div className="small muted">Стоимость продажи по РК (J3)</div>
+                  <div className="kpi">{fmtNum(adCostPerSale)}</div>
+                </div>
+                <div className="ue-kpi">
+                  <div className="small muted">ДРР (пример)</div>
+                  <div className="kpi">{fmtPct(state.rows[0] ? (computeRow(state.rows[0], adCostPerSale).drr) : 0)}</div>
+                </div>
+              </div>
+              <div className="small muted" style={{ marginTop: 8 }}>
+                Подставляется в таблицу как: <b>ДРР = J3 / Наша цена</b>
+              </div>
+            </div>
+          </div>
+        )}
 
         {activeTable === 'china' && (
           <div className="ue-panels">

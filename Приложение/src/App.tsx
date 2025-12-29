@@ -316,13 +316,12 @@ function AppInner() {
   // автообновление
   useEffect(() => {
     if (!sellerToken) return
-    if (tab !== 'reviews') return
     const t = window.setInterval(() => {
       void refresh()
     }, autoRefreshMs)
     return () => window.clearInterval(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sellerToken, autoRefreshMs, tab, filters])
+  }, [sellerToken, autoRefreshMs, filters])
 
   useEffect(() => {
     // при смене аккаунта — чистим список и ошибки
@@ -579,7 +578,7 @@ function AppInner() {
         progress={autoReplyProgress}
       />
 
-      {tab === 'reviews' && (
+      <div className={`tabPane ${tab === 'reviews' ? '' : 'isHidden'}`}>
         <>
           <FiltersBar
             value={filters}
@@ -660,9 +659,9 @@ function AppInner() {
             </div>
           )}
         </>
-      )}
+      </div>
 
-      {tab === 'adsScheduler' && (
+      <div className={`tabPane ${tab === 'adsScheduler' ? '' : 'isHidden'}`}>
         <>
           {!adsToken ? (
             <div className="card">
@@ -680,12 +679,15 @@ function AppInner() {
             <AdsSchedulerPage accountId={activeAccount?.id ?? 'default'} adsToken={adsToken} />
           )}
         </>
-      )}
+      </div>
 
+      <div className={`tabPane ${tab === 'unitEconomy' ? '' : 'isHidden'}`}>
+        <UnitEconomyPage accountId={activeAccount?.id ?? 'default'} />
+      </div>
 
-      {tab === 'unitEconomy' && <UnitEconomyPage accountId={activeAccount?.id ?? 'default'} />}
-
-      {tab === 'abtests' && <AbTestsPage sellerToken={sellerToken} adsToken={adsToken || null} openApiStrategyId={openApiStrategyId} />}
+      <div className={`tabPane ${tab === 'abtests' ? '' : 'isHidden'}`}>
+        <AbTestsPage sellerToken={sellerToken} adsToken={adsToken || null} openApiStrategyId={openApiStrategyId} />
+      </div>
     </div>
   )
 }

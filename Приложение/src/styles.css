@@ -475,6 +475,10 @@ a { color: inherit; }
   gap: 12px;
 }
 
+.tabPane.isHidden {
+  display: none;
+}
+
 .ab-testsList {
   display: flex;
   flex-direction: column;

@@ -35,6 +35,8 @@ export default function AbTestsPage({
   const [productsHasMore, setProductsHasMore] = useState(false)
   const [productQuery, setProductQuery] = useState('')
   const [selectedProduct, setSelectedProduct] = useState<CardShort | null>(null)
+  const [testName, setTestName] = useState('')
+  const [createOpen, setCreateOpen] = useState(false)
 
   const didInitialProductsLoad = useRef(false)
 
@@ -57,12 +59,12 @@ export default function AbTestsPage({
   const [priceVariants, setPriceVariants] = useState<number[]>([0, 0])
 
   const [tests, setTests] = useState<AbTest[]>(() => loadAbTests())
-  const [activeId, setActiveId] = useState<string | null>(() => {
-    const t = loadAbTests().find((x) => x.status === 'running')
+  const [selectedAbTestId, setSelectedAbTestId] = useState<string | null>(() => {
+    const t = loadAbTests().find((x) => x.status === 'running') ?? loadAbTests()[0]
     return t?.id ?? null
   })
 
-  const activeTest = useMemo(() => tests.find((t) => t.id === activeId) ?? null, [tests, activeId])
+  const selectedTest = useMemo(() => tests.find((t) => t.id === selectedAbTestId) ?? null, [tests, selectedAbTestId])
 
   // обновляем локально сохранённые тесты
   useEffect(() => {
@@ -70,7 +72,25 @@ export default function AbTestsPage({
     // (через upsert мы уже сохраняем; здесь просто синхронизируем UI)
   }, [tests])
 
-  const intervalRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (selectedAbTestId && tests.some((t) => t.id === selectedAbTestId)) return
+    const fallback = tests.find((t) => t.status === 'running') ?? tests[0] ?? null
+    setSelectedAbTestId(fallback?.id ?? null)
+  }, [tests, selectedAbTestId])
+
+  const intervalsRef = useRef<Record<string, number>>({})
+
+  function ensureTestName(): string {
+    const trimmed = testName.trim()
+    if (trimmed) return trimmed
+    const fallback = selectedProduct?.vendorCode ?? (Number.isFinite(nmId) ? String(nmId) : '')
+    return fallback ? `A/B тест ${fallback}` : 'A/B тест'
+  }
+
+  function isPriceAlreadySetError(e: any) {
+    const msg = String(e?.detail ?? e?.message ?? e)
+    return msg.includes('prices and discounts are already set')
+  }
 
   async function loadProductsPage(reset: boolean) {
     setProductsLoading(true)
@@ -133,6 +153,19 @@ export default function AbTestsPage({
   }, [sellerToken])
 
   function onSelectProduct(p: CardShort) {
+    if (selectedProduct?.nmId === p.nmId) {
+      setSelectedProduct(null)
+      setTestName('')
+      setCampaigns([])
+      setCampaignIdsSelected([])
+      setCampaignsError('')
+      setPhotosBaseline(null)
+      setPhotosAll(null)
+      setPhotoVariants([])
+      setBaselinePrice(null)
+      setPriceVariants([0, 0])
+      return
+    }
     setSelectedProduct(p)
     // сбрасываем состояния, завязанные на конкретный товар
     setCampaigns([])
@@ -143,6 +176,7 @@ export default function AbTestsPage({
     setPhotoVariants([])
     setBaselinePrice(null)
     setPriceVariants([0, 0])
+    setTestName(p.vendorCode ? `A/B тест ${p.vendorCode}` : `A/B тест ${p.nmId}`)
   }
 
   async function loadCampaigns() {
@@ -190,7 +224,7 @@ export default function AbTestsPage({
   }
 
   const campaignsForUi = useMemo(() => {
-    return campaigns
+    const base = campaigns
       .map((c) => {
         const id = Number(c?.advertId ?? c?.id)
         const name = String(c?.name ?? c?.settings?.name ?? `Кампания ${id}`)
@@ -200,7 +234,10 @@ export default function AbTestsPage({
         return { raw: c, id, name, status, payment, hasNm }
       })
       .filter((x) => Number.isFinite(x.id))
-  }, [campaigns, nmId])
+
+    if (!selectedProduct || !Number.isFinite(nmId)) return base
+    return base.filter((c) => c.hasNm)
+  }, [campaigns, nmId, selectedProduct])
 
   async function preparePhotos(files: FileList | null) {
     if (!files || files.length < 2) {
@@ -278,10 +315,6 @@ export default function AbTestsPage({
   }
 
   async function startTest() {
-    if (activeTest) {
-      push('Сначала остановите текущий тест')
-      return
-    }
     if (!adsToken) {
       push('Нужен токен WB Ads (Promotion)')
       return
@@ -335,7 +368,10 @@ export default function AbTestsPage({
     const test: AbTest = {
       id: testId,
       createdAt: new Date().toISOString(),
+      name: ensureTestName(),
       nmId: actualNmId,
+      vendorCode: selectedProduct?.vendorCode,
+      productTitle: selectedProduct?.title,
       type,
       slotMinutes,
       campaignIds: campaignIdsSelected,
@@ -353,8 +389,12 @@ export default function AbTestsPage({
     try {
       await applyVariant(sellerToken, test, variants[0], openApiStrategyId)
     } catch (e: any) {
-      push(`Не удалось применить вариант: ${String(e?.detail ?? e?.message ?? e)}`)
-      return
+      if (type === 'price' && isPriceAlreadySetError(e)) {
+        push('Вариант цены уже установлен, продолжаем тест')
+      } else {
+        push(`Не удалось применить вариант: ${String(e?.detail ?? e?.message ?? e)}`)
+        return
+      }
     }
 
     // берём стартовую точку метрик
@@ -369,17 +409,11 @@ export default function AbTestsPage({
 
     upsertAbTest(test)
     setTests(loadAbTests())
-    setActiveId(test.id)
+    setSelectedAbTestId(test.id)
+    setCreateOpen(false)
     push('A/B тест запущен')
 
-    // запускаем таймер
-    intervalRef.current = window.setInterval(async () => {
-      try {
-        await tick(test.id)
-      } catch (e) {
-        // ошибки уже обрабатываем в tick
-      }
-    }, slotMinutes * 60 * 1000)
+    startInterval(test.id, slotMinutes)
   }
 
   async function tick(testId: string) {
@@ -429,60 +463,100 @@ export default function AbTestsPage({
       await applyVariant(sellerToken, current, next, openApiStrategyId)
       current.activeVariantId = next.id
     } catch (e: any) {
-      push(`Переключение варианта: ошибка ${String(e?.detail ?? e?.message ?? e)}`)
-      // не меняем activeVariantId
+      if (current.type === 'price' && isPriceAlreadySetError(e)) {
+        current.activeVariantId = next.id
+        push('Вариант цены уже установлен, переключаемся без ошибки')
+      } else {
+        push(`Переключение варианта: ошибка ${String(e?.detail ?? e?.message ?? e)}`)
+        // не меняем activeVariantId
+      }
     }
 
     upsertAbTest(current)
     setTests(loadAbTests())
   }
 
-  async function stopTest() {
-    if (!activeTest) return
+  async function pauseTest(testId: string) {
+    const current = loadAbTests().find((t) => t.id === testId)
+    if (!current || current.status !== 'running') return
+    current.status = 'paused'
+    upsertAbTest(current)
+    setTests(loadAbTests())
+    stopInterval(testId)
+  }
 
-    const testId = activeTest.id
-    // финальный тик
+  async function resumeTest(testId: string) {
+    const current = loadAbTests().find((t) => t.id === testId)
+    if (!current || current.status !== 'paused') return
+    const variant = current.variants.find((v) => v.id === current.activeVariantId) ?? current.variants[0]
+    if (!variant) return
     try {
+      await applyVariant(sellerToken, current, variant, openApiStrategyId)
+    } catch (e: any) {
+      if (!(current.type === 'price' && isPriceAlreadySetError(e))) {
+        push(`Не удалось применить вариант: ${String(e?.detail ?? e?.message ?? e)}`)
+        return
+      }
+    }
+    current.status = 'running'
+    current.activeVariantId = variant.id
+    upsertAbTest(current)
+    setTests(loadAbTests())
+    startInterval(current.id, current.slotMinutes)
+  }
+
+  async function finishTest(testId: string) {
+    const current = loadAbTests().find((t) => t.id === testId)
+    if (!current) return
+    if (current.status === 'running') {
       await tick(testId)
-    } catch {}
-
-    const latest = loadAbTests().find((t) => t.id === testId)
-    if (!latest) return
-
-    latest.status = 'stopped'
-
+    }
+    current.status = 'stopped'
     try {
-      await restoreBaseline(sellerToken, latest, openApiStrategyId)
-      push('Базовое состояние восстановлено')
+      await restoreBaseline(sellerToken, current, openApiStrategyId)
     } catch (e: any) {
       push(`Не удалось восстановить базовое состояние: ${String(e?.detail ?? e?.message ?? e)}`)
     }
-
-    upsertAbTest(latest)
+    upsertAbTest(current)
     setTests(loadAbTests())
-    setActiveId(null)
-
-    if (intervalRef.current) {
-      window.clearInterval(intervalRef.current)
-      intervalRef.current = null
-    }
+    stopInterval(current.id)
   }
 
   useEffect(() => {
     // cleanup on unmount
     return () => {
-      if (intervalRef.current) window.clearInterval(intervalRef.current)
+      Object.values(intervalsRef.current).forEach((id) => window.clearInterval(id))
     }
   }, [])
 
-  const winner = useMemo(() => {
-    if (!activeTest) return null
-    const entries = Object.entries(activeTest.metrics)
-    if (entries.length === 0) return null
-    entries.sort((a, b) => (b[1].ctr ?? 0) - (a[1].ctr ?? 0))
-    const bestId = entries[0][0]
-    return activeTest.variants.find((v) => v.id === bestId) ?? null
-  }, [activeTest])
+  useEffect(() => {
+    const running = loadAbTests().filter((t) => t.status === 'running')
+    running.forEach((t) => startInterval(t.id, t.slotMinutes))
+    return () => {
+      running.forEach((t) => stopInterval(t.id))
+    }
+  }, [])
+
+  function startInterval(testId: string, minutes: number) {
+    stopInterval(testId)
+    intervalsRef.current[testId] = window.setInterval(async () => {
+      try {
+        await tick(testId)
+      } catch (e) {
+        // errors handled in tick
+      }
+    }, minutes * 60 * 1000)
+  }
+
+  function stopInterval(testId: string) {
+    const existing = intervalsRef.current[testId]
+    if (existing) {
+      window.clearInterval(existing)
+      delete intervalsRef.current[testId]
+    }
+  }
+
+  const displayTest = selectedTest
 
   const filteredProducts = useMemo(() => {
     const q = productQuery.trim().toLowerCase()
@@ -495,122 +569,162 @@ export default function AbTestsPage({
     return arr.slice(0, 80)
   }, [products, productQuery])
 
+  const historyItems = useMemo(() => {
+    if (!displayTest) return []
+    return displayTest.history.map((h, idx) => {
+      const variant = displayTest.variants.find((v) => v.id === h.variantId)
+      return { ...h, idx, variant }
+    })
+  }, [displayTest])
+
+  const variantTotals = useMemo(() => {
+    if (!displayTest) return []
+    return displayTest.variants.map((v) => {
+      const m = displayTest.metrics[v.id] ?? { views: 0, clicks: 0, atbs: 0, orders: 0, ctr: 0 }
+      return { variant: v, metrics: m }
+    })
+  }, [displayTest])
+
   return (
     <div className="grid">
       <div className="card">
-        <h2 style={{ marginTop: 0 }}>A/B тесты карточки (CTR)</h2>
-        <div className="small">
-          Тест работает «по времени»: каждые {slotMinutes} мин приложение переключает вариант (фото/цена) и записывает дельту
-          просмотров/кликов/корзины/заказов из рекламы. Для работы нужно держать страницу открытой.
+        <div className="ab-createHeader">
+          <div>
+            <div className="h3" style={{ margin: 0 }}>Создать A/B тест для товара</div>
+            <div className="small muted">Нажмите «+», чтобы развернуть настройки теста.</div>
+          </div>
+          <button className="btn ab-plus" onClick={() => setCreateOpen((v) => !v)}>
+            +
+          </button>
         </div>
 
-        <div style={{ height: 10 }} />
-
-        <div className="card" style={{ background: '#fafafa' }}>
-          <div className="row" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-            <strong>Выбор товара</strong>
-            <div className="row" style={{ gap: 8 }}>
-              <button
-                className="btn"
-                onClick={() => void loadProductsPage(true)}
-                disabled={productsLoading || !!activeTest}
-              >
-                {productsLoading ? 'Загрузка…' : products.length ? 'Обновить список товаров' : 'Подтянуть товары'}
-              </button>
-              {productsHasMore ? (
-                <button
-                  className="btn"
-                  onClick={() => void loadProductsPage(false)}
-                  disabled={productsLoading || !!activeTest}
-                >
-                  Ещё
-                </button>
-              ) : null}
+        {createOpen && (
+          <>
+            <div className="small">
+              Тест работает «по времени»: каждые {slotMinutes} мин приложение переключает вариант (фото/цена) и записывает дельту
+              просмотров/кликов/корзины/заказов из рекламы. Для работы нужно держать страницу открытой.
             </div>
-          </div>
 
-          {productsError ? <div className="error">{productsError}</div> : null}
+            <div style={{ height: 10 }} />
 
-          <div className="small" style={{ marginTop: 6 }}>
-            Подтянем список ваших карточек и дадим выбрать нужный товар. Если товаров много — используйте поиск.
-          </div>
+            <div className="card" style={{ background: '#fafafa' }}>
+              <div className="row" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                <strong>Выбор товара</strong>
+                <div className="row" style={{ gap: 8 }}>
+                  <button
+                    className="btn"
+                    onClick={() => void loadProductsPage(true)}
+                    disabled={productsLoading}
+                  >
+                    {productsLoading ? 'Загрузка…' : products.length ? 'Обновить список товаров' : 'Подтянуть товары'}
+                  </button>
+                  {productsHasMore ? (
+                    <button
+                      className="btn"
+                      onClick={() => void loadProductsPage(false)}
+                      disabled={productsLoading}
+                    >
+                      Ещё
+                    </button>
+                  ) : null}
+                </div>
+              </div>
 
-          <div style={{ height: 8 }} />
+              {productsError ? <div className="error">{productsError}</div> : null}
 
-          <input
-            className="input"
-            value={productQuery}
-            onChange={(e) => setProductQuery(e.target.value)}
-            placeholder="Поиск по артикулу / названию / nmId"
-            disabled={productsLoading}
-          />
+              <div className="small" style={{ marginTop: 6 }}>
+                Подтянем список ваших карточек и дадим выбрать нужный товар. Если товаров много — используйте поиск.
+              </div>
 
-          <div style={{ height: 8 }} />
+              <div style={{ height: 8 }} />
 
-          <div className="list" style={{ maxHeight: 220, overflow: 'auto' }}>
-            {products.length === 0 ? (
-              <div className="small">Пока ничего не загружено.</div>
-            ) : (
-              filteredProducts.map((p) => (
-                <label key={p.nmId} className="row" style={{ gap: 8, padding: '6px 0' }}>
-                  <input
-                    type="radio"
-                    name="product"
-                    checked={selectedProduct?.nmId === p.nmId}
-                    onChange={() => onSelectProduct(p)}
-                  />
-                  <div style={{ lineHeight: 1.2 }}>
-                    <div>
-                      <b>{p.vendorCode ?? '—'}</b> · nmId: {p.nmId}
-                      {p.hasPhoto === false ? <span className="badge">без фото</span> : null}
-                    </div>
-                    <div className="small">{p.title ?? ''}</div>
-                  </div>
-                </label>
-              ))
-            )}
-          </div>
+              <input
+                className="input ab-search"
+                value={productQuery}
+                onChange={(e) => setProductQuery(e.target.value)}
+                placeholder="Поиск по артикулу / названию / арт. продавца"
+                disabled={productsLoading}
+              />
 
-          <div className="small" style={{ marginTop: 6 }}>
-            Выбрано: {selectedProduct ? (
-              <>
-                <b>{selectedProduct.vendorCode ?? '—'}</b> · nmId: <b>{selectedProduct.nmId}</b>
-                {selectedProduct.title ? <> · {selectedProduct.title}</> : null}
-              </>
-            ) : (
-              <>ничего</>
-            )}
-          </div>
-        </div>
+              <div style={{ height: 8 }} />
+
+              <div className="list" style={{ maxHeight: 220, overflow: 'auto' }}>
+                {products.length === 0 ? (
+                  <div className="small">Пока ничего не загружено.</div>
+                ) : (
+                  filteredProducts.map((p) => (
+                    <label key={p.nmId} className="row" style={{ gap: 8, padding: '6px 0' }}>
+                      <input
+                        type="radio"
+                        name="product"
+                        className="ab-radio"
+                        checked={selectedProduct?.nmId === p.nmId}
+                        onClick={(e) => {
+                          if (selectedProduct?.nmId === p.nmId) {
+                            e.preventDefault()
+                          }
+                        }}
+                        onChange={() => onSelectProduct(p)}
+                      />
+                      <div style={{ lineHeight: 1.2 }}>
+                        <div>
+                          <b>{p.vendorCode ?? '—'}</b> · арт. продавца: {p.nmId}
+                          {p.hasPhoto === false ? <span className="badge">без фото</span> : null}
+                        </div>
+                        <div className="small">{p.title ?? ''}</div>
+                      </div>
+                    </label>
+                  ))
+                )}
+              </div>
+
+              <div className="small" style={{ marginTop: 6 }}>
+                Выбрано: {selectedProduct ? (
+                  <>
+                    <b>{selectedProduct.vendorCode ?? '—'}</b> · арт. продавца: <b>{selectedProduct.nmId}</b>
+                    {selectedProduct.title ? <> · {selectedProduct.title}</> : null}
+                  </>
+                ) : (
+                  <>ничего</>
+                )}
+              </div>
+            </div>
 
         <div style={{ height: 8 }} />
 
-        <div className="row">
-          <label className="small">Тип теста</label>
-          <select className="select" value={type} onChange={(e) => setType(e.target.value as any)}>
-            <option value="photo">Фото</option>
-            <option value="price">Цена</option>
-          </select>
-        </div>
+            <div className="row" style={{ flexWrap: 'wrap' }}>
+              <label className="small">Название теста</label>
+              <input
+                className="input"
+                value={testName}
+                onChange={(e) => setTestName(e.target.value)}
+                placeholder="Например: A/B тест обложки"
+              />
+              <label className="small">Тип теста</label>
+              <select className="select" value={type} onChange={(e) => setType(e.target.value as any)}>
+                <option value="photo">Фото</option>
+                <option value="price">Цена</option>
+              </select>
+            </div>
 
-        <div style={{ height: 8 }} />
+            <div style={{ height: 8 }} />
 
-        <div className="row">
-          <label className="small">Период (10..200 мин): {slotMinutes}</label>
-          <input
-            type="range"
-            min={10}
-            max={200}
-            step={5}
-            value={slotMinutes}
-            onChange={(e) => setSlotMinutes(Number(e.target.value))}
-            style={{ width: 240 }}
-          />
-        </div>
+            <div className="row">
+              <label className="small">Период (10..200 мин): {slotMinutes}</label>
+              <input
+                type="range"
+                min={10}
+                max={200}
+                step={5}
+                value={slotMinutes}
+                onChange={(e) => setSlotMinutes(Number(e.target.value))}
+                style={{ width: 240 }}
+              />
+            </div>
 
-        <div style={{ height: 12 }} />
+            <div style={{ height: 12 }} />
 
-        <div className="card" style={{ background: '#fafafa' }}>
+            <div className="card" style={{ background: '#fafafa' }}>
           <div className="row" style={{ justifyContent: 'space-between' }}>
             <strong>Рекламные кампании (источник метрик)</strong>
             <button className="btn" onClick={loadCampaigns} disabled={campaignsLoading}>
@@ -618,7 +732,7 @@ export default function AbTestsPage({
             </button>
           </div>
           {campaignsError && <div className="error">{campaignsError}</div>}
-          <div className="small">Выберите кампании, где крутится этот nmId (мы суммируем метрики по выбранным кампаниям).</div>
+          <div className="small">Выберите кампании, где крутится этот арт. продавца (мы суммируем метрики по выбранным кампаниям).</div>
 
           <div style={{ height: 8 }} />
 
@@ -640,7 +754,7 @@ export default function AbTestsPage({
                   />
                   <div>
                     <div><strong>{c.name}</strong></div>
-                    <div className="small">ID: {c.id} · status: {String(c.status)} · {String(c.payment)} {c.hasNm ? '· ✅ содержит nmId' : ''}</div>
+                    <div className="small">ID: {c.id} · status: {String(c.status)} · {String(c.payment)} {c.hasNm ? '· ✅ содержит арт. продавца' : ''}</div>
                   </div>
                 </label>
               )
@@ -650,150 +764,260 @@ export default function AbTestsPage({
           </div>
         </div>
 
-        <div style={{ height: 12 }} />
+            <div style={{ height: 12 }} />
 
-        {type === 'photo' ? (
-          <div className="card" style={{ background: '#fafafa' }}>
-            <strong>Варианты фото (2–4)</strong>
-            <div className="small">Загрузите файлы: мы добавим их в карточку как новые фото, а потом будем менять порядок (обложку).</div>
-            <div style={{ height: 8 }} />
-            <input
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={(e) => preparePhotos(e.target.files)}
-              disabled={uploadingPhotos || !!activeTest}
-            />
-            {uploadingPhotos && <div className="small">Загрузка фото в WB…</div>}
-            {photoVariants.length > 0 && (
-              <div style={{ marginTop: 8 }} className="small">
-                Подготовлено вариантов: {photoVariants.length}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="card" style={{ background: '#fafafa' }}>
-            <div className="row" style={{ justifyContent: 'space-between' }}>
-              <strong>Варианты цены (2–4)</strong>
-              <button className="btn" onClick={prepareBaselinePrice} disabled={!!activeTest}>
-                Получить базовую цену
-              </button>
-            </div>
-            {baselinePrice && (
-              <div className="small">База: {baselinePrice.price} ₽, скидка: {baselinePrice.discount}% (скидка сохраняется, меняем только цену)</div>
-            )}
-            <div style={{ height: 8 }} />
-            {priceVariants.map((p, i) => (
-              <div key={i} className="row" style={{ marginBottom: 8 }}>
-                <label className="small">Вариант {i + 1}</label>
+            {type === 'photo' ? (
+              <div className="card" style={{ background: '#fafafa' }}>
+                <strong>Варианты фото (2–4)</strong>
+                <div className="small">Загрузите файлы: мы добавим их в карточку как новые фото, а потом будем менять порядок (обложку).</div>
+                <div style={{ height: 8 }} />
                 <input
-                  type="number"
-                  className="input"
-                  value={p || ''}
-                  onChange={(e) => {
-                    const v = Number(e.target.value)
-                    setPriceVariants((prev) => {
-                      const copy = [...prev]
-                      copy[i] = v
-                      return copy
-                    })
-                  }}
-                  placeholder="Цена"
-                  disabled={!!activeTest}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={(e) => preparePhotos(e.target.files)}
+                disabled={uploadingPhotos}
                 />
+                {uploadingPhotos && <div className="small">Загрузка фото в WB…</div>}
+                {photoVariants.length > 0 && (
+                  <div style={{ marginTop: 8 }} className="small">
+                    Подготовлено вариантов: {photoVariants.length}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="card" style={{ background: '#fafafa' }}>
+                <div className="row" style={{ justifyContent: 'space-between' }}>
+                  <strong>Варианты цены (2–4)</strong>
+                  <button className="btn" onClick={prepareBaselinePrice}>
+                    Получить базовую цену
+                  </button>
+                </div>
+                {baselinePrice && (
+                  <div className="small">База: {baselinePrice.price} ₽, скидка: {baselinePrice.discount}% (скидка сохраняется, меняем только цену)</div>
+                )}
+                <div style={{ height: 8 }} />
+                {priceVariants.map((p, i) => (
+                  <div key={i} className="row" style={{ marginBottom: 8 }}>
+                    <label className="small">Вариант {i + 1}</label>
+                    <input
+                      type="number"
+                      className="input"
+                      value={p || ''}
+                      onChange={(e) => {
+                        const v = Number(e.target.value)
+                        setPriceVariants((prev) => {
+                          const copy = [...prev]
+                          copy[i] = v
+                          return copy
+                        })
+                      }}
+                      placeholder="Цена"
+                    />
+                    <button
+                      className="btn"
+                      onClick={() => setPriceVariants((prev) => prev.filter((_, idx) => idx !== i))}
+                      disabled={priceVariants.length <= 2}
+                    >
+                      Удалить
+                    </button>
+                  </div>
+                ))}
                 <button
                   className="btn"
-                  onClick={() => setPriceVariants((prev) => prev.filter((_, idx) => idx !== i))}
-                  disabled={priceVariants.length <= 2 || !!activeTest}
+                  onClick={() => setPriceVariants((prev) => (prev.length < 4 ? [...prev, 0] : prev))}
+                  disabled={priceVariants.length >= 4}
                 >
-                  Удалить
+                  + Добавить вариант
                 </button>
               </div>
-            ))}
-            <button
-              className="btn"
-              onClick={() => setPriceVariants((prev) => (prev.length < 4 ? [...prev, 0] : prev))}
-              disabled={priceVariants.length >= 4 || !!activeTest}
-            >
-              + Добавить вариант
-            </button>
-          </div>
-        )}
+            )}
 
-        <div style={{ height: 12 }} />
+            <div style={{ height: 12 }} />
 
-        <div className="row">
-          <button className="btn primary" onClick={startTest} disabled={!!activeTest}>
-            Запустить тест
-          </button>
-          {activeTest && (
-            <button className="btn" onClick={stopTest}>
-              Остановить и восстановить
-            </button>
-          )}
-        </div>
-
-        {activeTest && winner && (
-          <div style={{ marginTop: 10 }} className="small">
-            Лидер по CTR сейчас: <strong>{winner.label}</strong>
-          </div>
+            <div className="row">
+              <button className="btn primary" onClick={startTest}>
+                Запустить тест
+              </button>
+            </div>
+          </>
         )}
       </div>
 
       <div className="card">
-        <h2 style={{ marginTop: 0 }}>Отчёт</h2>
+        <div className="h3" style={{ marginTop: 0 }}>Созданные A/B тесты</div>
+        <div className="ab-testsList">
+          {tests.map((t, idx) => (
+            <div key={t.id} className="ab-testGroup">
+              <div
+                className={`ab-testItem ${selectedAbTestId === t.id ? 'is-active' : ''} ${idx % 2 === 0 ? 'is-yellow' : 'is-black'}`}
+                onClick={() => setSelectedAbTestId((prev) => (prev === t.id ? null : t.id))}
+                role="button"
+                tabIndex={0}
+              >
+                <div>
+                  <div style={{ fontWeight: 700 }}>{t.name || `A/B тест ${t.nmId}`}</div>
+                  <div className="small muted">
+                    арт. продавца: {t.nmId} · {t.vendorCode ?? '—'} {t.productTitle ? `· ${t.productTitle}` : ''} · {t.type === 'photo' ? 'Фото' : 'Цена'}
+                  </div>
+                </div>
+                <div className="ab-testActions">
+                  <span className={`statusDot ${t.status === 'running' ? 'isOn' : ''}`} />
+                  {t.status === 'running' ? (
+                    <button className="btn" onClick={(e) => { e.stopPropagation(); void pauseTest(t.id) }}>Пауза</button>
+                  ) : t.status === 'paused' ? (
+                    <button className="btn primary" onClick={(e) => { e.stopPropagation(); void resumeTest(t.id) }}>Старт</button>
+                  ) : null}
+                  <button className="btn ab-stop" onClick={(e) => { e.stopPropagation(); void finishTest(t.id) }} title="Завершить тест">
+                    ✕
+                  </button>
+                </div>
+              </div>
 
-        {activeTest ? (
-          <>
-            <div className="kv">
-              <span>nmId: {activeTest.nmId}</span>
-              <span>тип: {activeTest.type}</span>
-              <span>интервал: {activeTest.slotMinutes} мин</span>
-              <span>кампаний: {activeTest.campaignIds.length}</span>
-            </div>
-
-            <div style={{ height: 12 }} />
-
-            <div className="list">
-              {activeTest.variants.map((v) => {
-                const m = activeTest.metrics[v.id]
-                const isActive = activeTest.activeVariantId === v.id
-                return (
-                  <div key={v.id} className="card" style={{ borderColor: isActive ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.08)' }}>
-                    <div className="row" style={{ justifyContent: 'space-between' }}>
-                      <strong>{v.label}</strong>
-                      <span className="badge">{isActive ? '✅ сейчас показывается' : ' '}</span>
-                    </div>
-                    <div className="small">
-                      Просмотры: {m?.views ?? 0} · Клики: {m?.clicks ?? 0} · CTR: {m?.ctr ?? 0}% · В корзину: {m?.atbs ?? 0} · Заказы: {m?.orders ?? 0}
+              {selectedAbTestId === t.id && displayTest ? (
+                <div className="ab-testDetails">
+                  <div className="ab-testHeader">
+                    <div>
+                      <div className="h3" style={{ margin: 0 }}>{displayTest.name || `A/B тест ${displayTest.nmId}`}</div>
+                      <div className="small muted">
+                        Создан: {new Date(displayTest.createdAt).toLocaleString()} · статус: {displayTest.status === 'running' ? 'активен' : displayTest.status === 'paused' ? 'на паузе' : 'остановлен'}
+                      </div>
                     </div>
                   </div>
-                )
-              })}
-            </div>
 
-            <div style={{ height: 12 }} />
+                  <div className="kv">
+                    <span>арт. продавца: {displayTest.nmId}</span>
+                    <span>тип: {displayTest.type === 'photo' ? 'Фото' : 'Цена'}</span>
+                    <span>интервал: {displayTest.slotMinutes} мин</span>
+                    <span>кампаний: {displayTest.campaignIds.length}</span>
+                  </div>
 
-            <div className="card" style={{ background: '#fafafa' }}>
-              <strong>История переключений</strong>
-              <div className="small">На каждом шаге записывается дельта метрик, которую мы относим к текущему варианту.</div>
-              <div style={{ height: 8 }} />
-              <div style={{ maxHeight: 320, overflow: 'auto' }}>
-                {activeTest.history.slice().reverse().map((h, idx) => {
-                  const v = activeTest.variants.find((x) => x.id === h.variantId)
-                  return (
-                    <div key={idx} className="small" style={{ padding: '6px 0', borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
-                      {new Date(h.ts).toLocaleString()} — <strong>{v?.label ?? h.variantId}</strong> — Δ просмотры {h.delta.views}, клики {h.delta.clicks}, корзина {h.delta.atbs}, заказы {h.delta.orders}
+                  <div style={{ height: 12 }} />
+
+                  <div
+                    className="ab-variantsGrid"
+                    style={{ gridTemplateColumns: `repeat(${Math.max(1, displayTest.variants.length)}, minmax(0, 1fr))` }}
+                  >
+                    {displayTest.variants.map((v) => {
+                      const m = displayTest.metrics[v.id]
+                      const isActive = displayTest.status === 'running' && displayTest.activeVariantId === v.id
+                      return (
+                        <div key={v.id} className="card" style={{ borderColor: isActive ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.08)' }}>
+                          <div className="row" style={{ justifyContent: 'space-between' }}>
+                            <strong>{v.label}</strong>
+                            <span className="badge">{isActive ? '✅ сейчас показывается' : ' '}</span>
+                          </div>
+                          <div className="small">
+                            Просмотры: {m?.views ?? 0} · Клики: {m?.clicks ?? 0} · CTR: {m?.ctr ?? 0}% · В корзину: {m?.atbs ?? 0} · Заказы: {m?.orders ?? 0}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {displayTest.type === 'photo' && (
+                    <>
+                      <div style={{ height: 12 }} />
+                      <div className="card" style={{ background: '#fafafa' }}>
+                        <strong>Фото, участвующие в тесте</strong>
+                        <div className="ab-photos">
+                          {displayTest.variants.filter((v) => v.kind === 'photo').map((v) => (
+                            <img key={v.id} src={v.coverUrl} alt={v.label} className="ab-photoTile" />
+                          ))}
+                          {displayTest.variants.filter((v) => v.kind === 'photo').length === 0 && (
+                            <div className="small muted">Фото не найдены.</div>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  <div style={{ height: 12 }} />
+
+                  <div className="card" style={{ background: '#fafafa' }}>
+                    <strong>Итоги по вариантам</strong>
+                    <div className="small">Суммарные показатели за все периоды по каждому варианту.</div>
+                    <div style={{ height: 8 }} />
+                    <div className="list">
+                      {variantTotals.map(({ variant, metrics }) => (
+                        <div key={variant.id} className="card">
+                          <div style={{ fontWeight: 600 }}>{variant.label}</div>
+                          <div className="small">
+                            Показы: {metrics.views} · Клики: {metrics.clicks} · CTR: {metrics.ctr}% · В корзину: {metrics.atbs} · Заказы: {metrics.orders}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  )
-                })}
-                {activeTest.history.length === 0 && <div className="small muted">Пока нет данных.</div>}
-              </div>
+                  </div>
+
+                  <div style={{ height: 12 }} />
+
+                  <div className="card" style={{ background: '#fafafa' }}>
+                    <strong>Логи теста</strong>
+                    <div className="small">Фиксируем, какой вариант применяли и какие метрики получили за период.</div>
+                    <div style={{ height: 8 }} />
+                    <div style={{ maxHeight: 320, overflow: 'auto' }}>
+                      {historyItems.slice().reverse().map((h, idx) => {
+                        const v = h.variant
+                        const label = v?.label ?? h.variantId
+                        return (
+                          <div key={idx} className="ab-log">
+                            {v?.kind === 'photo' && v.coverUrl ? (
+                              <img src={v.coverUrl} alt={label} className="ab-thumb" />
+                            ) : (
+                              <div className="ab-thumb ab-thumb--price">₽</div>
+                            )}
+                            <div>
+                              <div style={{ fontWeight: 600 }}>{label}</div>
+                              <div className="small muted">{new Date(h.ts).toLocaleString()}</div>
+                              <div className="small">
+                                Показы: {h.delta.views} · Клики: {h.delta.clicks} · Заказы: {h.delta.orders}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                      {historyItems.length === 0 && <div className="small muted">Пока нет данных.</div>}
+                    </div>
+                  </div>
+
+                  <div style={{ height: 12 }} />
+
+                  <div className="card" style={{ background: '#fafafa' }}>
+                    <strong>График по интервалам</strong>
+                    <div className="small">Каждый столбец — один тестовый промежуток, высота по показам.</div>
+                    <div style={{ height: 8 }} />
+                    {historyItems.length > 0 ? (
+                      <div className="ab-chart">
+                        {(() => {
+                          const maxViews = Math.max(1, ...historyItems.map((h) => h.delta.views))
+                          return historyItems.map((h, i) => {
+                            const v = h.variant
+                            const heightPct = Math.max(8, Math.round((h.delta.views / maxViews) * 100))
+                            return (
+                              <div key={i} className="ab-bar">
+                                <div className="ab-barFill" style={{ height: `${heightPct}%` }} />
+                                {v?.kind === 'photo' && v.coverUrl ? (
+                                  <img src={v.coverUrl} alt={v.label} className="ab-barThumb" />
+                                ) : (
+                                  <div className="ab-barLabel">{v?.kind === 'price' ? `₽${v.price}` : '—'}</div>
+                                )}
+                                <div className="ab-barValue">{h.delta.views}</div>
+                              </div>
+                            )
+                          })
+                        })()}
+                      </div>
+                    ) : (
+                      <div className="small muted">Нет данных для графика.</div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
             </div>
-          </>
-        ) : (
-          <div className="small muted">Нет активного теста. Запустите тест слева.</div>
-        )}
+          ))}
+          {tests.length === 0 && <div className="small muted">Пока нет тестов.</div>}
+        </div>
       </div>
     </div>
   )

@@ -706,10 +706,39 @@ function AppInner() {
 
 export default function App() {
   const [ready, setReady] = useState(false)
+  const [phone, setPhone] = useState(() => localStorage.getItem('wb_phone_auth') || '')
+  const [phoneAuth, setPhoneAuth] = useState(() => Boolean(localStorage.getItem('wb_phone_auth_ok')))
   return (
     <ToastProvider>
       {!ready && <SplashScreen ms={2000} onDone={() => setReady(true)} />}
-      {ready && <AppInner />}
+      {ready && !phoneAuth && (
+        <div className="authOverlay">
+          <div className="card authCard">
+            <div className="h2">Авторизация по номеру телефона</div>
+            <div className="small muted">
+              Подключитесь по номеру телефона, чтобы продолжить работу в приложении.
+            </div>
+            <input
+              className="input"
+              placeholder="+7 (___) ___-__-__"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+            />
+            <button
+              className="btn primary"
+              onClick={() => {
+                if (phone.trim().length < 10) return
+                localStorage.setItem('wb_phone_auth', phone.trim())
+                localStorage.setItem('wb_phone_auth_ok', '1')
+                setPhoneAuth(true)
+              }}
+            >
+              Подключиться по номеру телефона
+            </button>
+          </div>
+        </div>
+      )}
+      {ready && phoneAuth && <AppInner />}
     </ToastProvider>
   )
 }

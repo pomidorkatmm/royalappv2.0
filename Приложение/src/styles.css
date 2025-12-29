@@ -479,6 +479,24 @@ a { color: inherit; }
   display: none;
 }
 
+.authOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(255, 212, 0, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9998;
+}
+
+.authCard {
+  width: min(420px, 92vw);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: center;
+}
+
 .ab-testsList {
   display: flex;
   flex-direction: column;

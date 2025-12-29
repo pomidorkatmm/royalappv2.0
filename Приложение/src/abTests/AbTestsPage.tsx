@@ -59,16 +59,12 @@ export default function AbTestsPage({
   const [priceVariants, setPriceVariants] = useState<number[]>([0, 0])
 
   const [tests, setTests] = useState<AbTest[]>(() => loadAbTests())
-  const [selectedTestId, setSelectedTestId] = useState<string | null>(() => {
-    const t = loadAbTests().find((x) => x.status === 'running') ?? loadAbTests()[0]
-    return t?.id ?? null
-  })
-  const [selectedTestId, setSelectedTestId] = useState<string | null>(() => {
+  const [selectedAbTestId, setSelectedAbTestId] = useState<string | null>(() => {
     const t = loadAbTests().find((x) => x.status === 'running') ?? loadAbTests()[0]
     return t?.id ?? null
   })
 
-  const selectedTest = useMemo(() => tests.find((t) => t.id === selectedTestId) ?? null, [tests, selectedTestId])
+  const selectedTest = useMemo(() => tests.find((t) => t.id === selectedAbTestId) ?? null, [tests, selectedAbTestId])
 
   // обновляем локально сохранённые тесты
   useEffect(() => {
@@ -77,24 +73,12 @@ export default function AbTestsPage({
   }, [tests])
 
   useEffect(() => {
-    if (selectedTestId && tests.some((t) => t.id === selectedTestId)) return
+    if (selectedAbTestId && tests.some((t) => t.id === selectedAbTestId)) return
     const fallback = tests.find((t) => t.status === 'running') ?? tests[0] ?? null
-    setSelectedTestId(fallback?.id ?? null)
-  }, [tests, selectedTestId])
+    setSelectedAbTestId(fallback?.id ?? null)
+  }, [tests, selectedAbTestId])
 
   const intervalsRef = useRef<Record<string, number>>({})
-
-  function ensureTestName(): string {
-    const trimmed = testName.trim()
-    if (trimmed) return trimmed
-    const fallback = selectedProduct?.vendorCode ?? (Number.isFinite(nmId) ? String(nmId) : '')
-    return fallback ? `A/B тест ${fallback}` : 'A/B тест'
-  }
-
-  function isPriceAlreadySetError(e: any) {
-    const msg = String(e?.detail ?? e?.message ?? e)
-    return msg.includes('prices and discounts are already set')
-  }
 
   function ensureTestName(): string {
     const trimmed = testName.trim()
@@ -425,7 +409,7 @@ export default function AbTestsPage({
 
     upsertAbTest(test)
     setTests(loadAbTests())
-    setSelectedTestId(test.id)
+    setSelectedAbTestId(test.id)
     setCreateOpen(false)
     push('A/B тест запущен')
 
@@ -538,71 +522,6 @@ export default function AbTestsPage({
     stopInterval(current.id)
   }
 
-  async function pauseTest(testId: string) {
-    const current = loadAbTests().find((t) => t.id === testId)
-    if (!current || current.status !== 'running') return
-    current.status = 'paused'
-    upsertAbTest(current)
-    setTests(loadAbTests())
-    setActiveId(null)
-    if (intervalRef.current) {
-      window.clearInterval(intervalRef.current)
-      intervalRef.current = null
-    }
-  }
-
-  async function resumeTest(testId: string) {
-    if (activeTest) {
-      push('Сначала поставьте на паузу текущий тест')
-      return
-    }
-    const current = loadAbTests().find((t) => t.id === testId)
-    if (!current || current.status !== 'paused') return
-    const variant = current.variants.find((v) => v.id === current.activeVariantId) ?? current.variants[0]
-    if (!variant) return
-    try {
-      await applyVariant(sellerToken, current, variant, openApiStrategyId)
-    } catch (e: any) {
-      if (!(current.type === 'price' && isPriceAlreadySetError(e))) {
-        push(`Не удалось применить вариант: ${String(e?.detail ?? e?.message ?? e)}`)
-        return
-      }
-    }
-    current.status = 'running'
-    current.activeVariantId = variant.id
-    upsertAbTest(current)
-    setTests(loadAbTests())
-    setActiveId(current.id)
-    intervalRef.current = window.setInterval(async () => {
-      try {
-        await tick(current.id)
-      } catch (e) {
-        // errors handled in tick
-      }
-    }, current.slotMinutes * 60 * 1000)
-  }
-
-  async function finishTest(testId: string) {
-    const current = loadAbTests().find((t) => t.id === testId)
-    if (!current) return
-    if (current.status === 'running') {
-      await tick(testId)
-    }
-    current.status = 'stopped'
-    try {
-      await restoreBaseline(sellerToken, current, openApiStrategyId)
-    } catch (e: any) {
-      push(`Не удалось восстановить базовое состояние: ${String(e?.detail ?? e?.message ?? e)}`)
-    }
-    upsertAbTest(current)
-    setTests(loadAbTests())
-    if (activeId === current.id) setActiveId(null)
-    if (intervalRef.current) {
-      window.clearInterval(intervalRef.current)
-      intervalRef.current = null
-    }
-  }
-
   useEffect(() => {
     // cleanup on unmount
     return () => {
@@ -638,8 +557,6 @@ export default function AbTestsPage({
   }
 
   const displayTest = selectedTest
-
-  const displayTest = selectedTest ?? activeTest
 
   const filteredProducts = useMemo(() => {
     const q = productQuery.trim().toLowerCase()
@@ -934,8 +851,8 @@ export default function AbTestsPage({
           {tests.map((t, idx) => (
             <div key={t.id} className="ab-testGroup">
               <div
-                className={`ab-testItem ${selectedTestId === t.id ? 'is-active' : ''} ${idx % 2 === 0 ? 'is-yellow' : 'is-black'}`}
-                onClick={() => setSelectedTestId((prev) => (prev === t.id ? null : t.id))}
+                className={`ab-testItem ${selectedAbTestId === t.id ? 'is-active' : ''} ${idx % 2 === 0 ? 'is-yellow' : 'is-black'}`}
+                onClick={() => setSelectedAbTestId((prev) => (prev === t.id ? null : t.id))}
                 role="button"
                 tabIndex={0}
               >
@@ -958,7 +875,7 @@ export default function AbTestsPage({
                 </div>
               </div>
 
-              {selectedTestId === t.id && displayTest ? (
+              {selectedAbTestId === t.id && displayTest ? (
                 <div className="ab-testDetails">
                   <div className="ab-testHeader">
                     <div>

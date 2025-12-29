@@ -544,6 +544,11 @@ a { color: inherit; }
   background: #fff;
 }
 
+.ab-variantsGrid {
+  display: grid;
+  gap: 10px;
+}
+
 .ab-testHeader {
   display: flex;
   justify-content: space-between;

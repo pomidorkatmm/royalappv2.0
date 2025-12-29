@@ -699,7 +699,6 @@ export default function AbTestsPage({
                 value={testName}
                 onChange={(e) => setTestName(e.target.value)}
                 placeholder="Например: A/B тест обложки"
-                disabled={!!activeTest}
               />
               <label className="small">Тип теста</label>
               <select className="select" value={type} onChange={(e) => setType(e.target.value as any)}>
@@ -895,7 +894,10 @@ export default function AbTestsPage({
 
                   <div style={{ height: 12 }} />
 
-                  <div className="list">
+                  <div
+                    className="ab-variantsGrid"
+                    style={{ gridTemplateColumns: `repeat(${Math.max(1, displayTest.variants.length)}, minmax(0, 1fr))` }}
+                  >
                     {displayTest.variants.map((v) => {
                       const m = displayTest.metrics[v.id]
                       const isActive = displayTest.status === 'running' && displayTest.activeVariantId === v.id

@@ -59,8 +59,8 @@ export default function AbTestsPage({
   const [priceVariants, setPriceVariants] = useState<number[]>([0, 0])
 
   const [tests, setTests] = useState<AbTest[]>(() => loadAbTests())
-  const [activeId, setActiveId] = useState<string | null>(() => {
-    const t = loadAbTests().find((x) => x.status === 'running')
+  const [selectedTestId, setSelectedTestId] = useState<string | null>(() => {
+    const t = loadAbTests().find((x) => x.status === 'running') ?? loadAbTests()[0]
     return t?.id ?? null
   })
   const [selectedTestId, setSelectedTestId] = useState<string | null>(() => {
@@ -68,7 +68,6 @@ export default function AbTestsPage({
     return t?.id ?? null
   })
 
-  const activeTest = useMemo(() => tests.find((t) => t.id === activeId) ?? null, [tests, activeId])
   const selectedTest = useMemo(() => tests.find((t) => t.id === selectedTestId) ?? null, [tests, selectedTestId])
 
   // обновляем локально сохранённые тесты
@@ -83,7 +82,19 @@ export default function AbTestsPage({
     setSelectedTestId(fallback?.id ?? null)
   }, [tests, selectedTestId])
 
-  const intervalRef = useRef<number | null>(null)
+  const intervalsRef = useRef<Record<string, number>>({})
+
+  function ensureTestName(): string {
+    const trimmed = testName.trim()
+    if (trimmed) return trimmed
+    const fallback = selectedProduct?.vendorCode ?? (Number.isFinite(nmId) ? String(nmId) : '')
+    return fallback ? `A/B тест ${fallback}` : 'A/B тест'
+  }
+
+  function isPriceAlreadySetError(e: any) {
+    const msg = String(e?.detail ?? e?.message ?? e)
+    return msg.includes('prices and discounts are already set')
+  }
 
   function ensureTestName(): string {
     const trimmed = testName.trim()
@@ -320,10 +331,6 @@ export default function AbTestsPage({
   }
 
   async function startTest() {
-    if (activeTest) {
-      push('Сначала остановите текущий тест')
-      return
-    }
     if (!adsToken) {
       push('Нужен токен WB Ads (Promotion)')
       return
@@ -418,19 +425,11 @@ export default function AbTestsPage({
 
     upsertAbTest(test)
     setTests(loadAbTests())
-    setActiveId(test.id)
     setSelectedTestId(test.id)
     setCreateOpen(false)
     push('A/B тест запущен')
 
-    // запускаем таймер
-    intervalRef.current = window.setInterval(async () => {
-      try {
-        await tick(test.id)
-      } catch (e) {
-        // ошибки уже обрабатываем в tick
-      }
-    }, slotMinutes * 60 * 1000)
+    startInterval(test.id, slotMinutes)
   }
 
   async function tick(testId: string) {
@@ -493,35 +492,50 @@ export default function AbTestsPage({
     setTests(loadAbTests())
   }
 
-  async function stopTest() {
-    if (!activeTest) return
+  async function pauseTest(testId: string) {
+    const current = loadAbTests().find((t) => t.id === testId)
+    if (!current || current.status !== 'running') return
+    current.status = 'paused'
+    upsertAbTest(current)
+    setTests(loadAbTests())
+    stopInterval(testId)
+  }
 
-    const testId = activeTest.id
-    // финальный тик
+  async function resumeTest(testId: string) {
+    const current = loadAbTests().find((t) => t.id === testId)
+    if (!current || current.status !== 'paused') return
+    const variant = current.variants.find((v) => v.id === current.activeVariantId) ?? current.variants[0]
+    if (!variant) return
     try {
+      await applyVariant(sellerToken, current, variant, openApiStrategyId)
+    } catch (e: any) {
+      if (!(current.type === 'price' && isPriceAlreadySetError(e))) {
+        push(`Не удалось применить вариант: ${String(e?.detail ?? e?.message ?? e)}`)
+        return
+      }
+    }
+    current.status = 'running'
+    current.activeVariantId = variant.id
+    upsertAbTest(current)
+    setTests(loadAbTests())
+    startInterval(current.id, current.slotMinutes)
+  }
+
+  async function finishTest(testId: string) {
+    const current = loadAbTests().find((t) => t.id === testId)
+    if (!current) return
+    if (current.status === 'running') {
       await tick(testId)
-    } catch {}
-
-    const latest = loadAbTests().find((t) => t.id === testId)
-    if (!latest) return
-
-    latest.status = 'stopped'
-
+    }
+    current.status = 'stopped'
     try {
-      await restoreBaseline(sellerToken, latest, openApiStrategyId)
-      push('Базовое состояние восстановлено')
+      await restoreBaseline(sellerToken, current, openApiStrategyId)
     } catch (e: any) {
       push(`Не удалось восстановить базовое состояние: ${String(e?.detail ?? e?.message ?? e)}`)
     }
-
-    upsertAbTest(latest)
+    upsertAbTest(current)
     setTests(loadAbTests())
-    setActiveId(null)
-
-    if (intervalRef.current) {
-      window.clearInterval(intervalRef.current)
-      intervalRef.current = null
-    }
+    stopInterval(current.id)
   }
 
   async function pauseTest(testId: string) {
@@ -592,18 +606,38 @@ export default function AbTestsPage({
   useEffect(() => {
     // cleanup on unmount
     return () => {
-      if (intervalRef.current) window.clearInterval(intervalRef.current)
+      Object.values(intervalsRef.current).forEach((id) => window.clearInterval(id))
     }
   }, [])
 
-  const winner = useMemo(() => {
-    if (!activeTest) return null
-    const entries = Object.entries(activeTest.metrics)
-    if (entries.length === 0) return null
-    entries.sort((a, b) => (b[1].ctr ?? 0) - (a[1].ctr ?? 0))
-    const bestId = entries[0][0]
-    return activeTest.variants.find((v) => v.id === bestId) ?? null
-  }, [activeTest])
+  useEffect(() => {
+    const running = loadAbTests().filter((t) => t.status === 'running')
+    running.forEach((t) => startInterval(t.id, t.slotMinutes))
+    return () => {
+      running.forEach((t) => stopInterval(t.id))
+    }
+  }, [])
+
+  function startInterval(testId: string, minutes: number) {
+    stopInterval(testId)
+    intervalsRef.current[testId] = window.setInterval(async () => {
+      try {
+        await tick(testId)
+      } catch (e) {
+        // errors handled in tick
+      }
+    }, minutes * 60 * 1000)
+  }
+
+  function stopInterval(testId: string) {
+    const existing = intervalsRef.current[testId]
+    if (existing) {
+      window.clearInterval(existing)
+      delete intervalsRef.current[testId]
+    }
+  }
+
+  const displayTest = selectedTest
 
   const displayTest = selectedTest ?? activeTest
 
@@ -642,7 +676,7 @@ export default function AbTestsPage({
             <div className="h3" style={{ margin: 0 }}>Создать A/B тест для товара</div>
             <div className="small muted">Нажмите «+», чтобы развернуть настройки теста.</div>
           </div>
-          <button className="btn ab-plus" onClick={() => setCreateOpen((v) => !v)} disabled={!!activeTest}>
+          <button className="btn ab-plus" onClick={() => setCreateOpen((v) => !v)}>
             +
           </button>
         </div>
@@ -663,7 +697,7 @@ export default function AbTestsPage({
                   <button
                     className="btn"
                     onClick={() => void loadProductsPage(true)}
-                    disabled={productsLoading || !!activeTest}
+                    disabled={productsLoading}
                   >
                     {productsLoading ? 'Загрузка…' : products.length ? 'Обновить список товаров' : 'Подтянуть товары'}
                   </button>
@@ -671,7 +705,7 @@ export default function AbTestsPage({
                     <button
                       className="btn"
                       onClick={() => void loadProductsPage(false)}
-                      disabled={productsLoading || !!activeTest}
+                      disabled={productsLoading}
                     >
                       Ещё
                     </button>
@@ -826,7 +860,7 @@ export default function AbTestsPage({
                   accept="image/*"
                   multiple
                   onChange={(e) => preparePhotos(e.target.files)}
-                  disabled={uploadingPhotos || !!activeTest}
+                disabled={uploadingPhotos}
                 />
                 {uploadingPhotos && <div className="small">Загрузка фото в WB…</div>}
                 {photoVariants.length > 0 && (
@@ -839,7 +873,7 @@ export default function AbTestsPage({
               <div className="card" style={{ background: '#fafafa' }}>
                 <div className="row" style={{ justifyContent: 'space-between' }}>
                   <strong>Варианты цены (2–4)</strong>
-                  <button className="btn" onClick={prepareBaselinePrice} disabled={!!activeTest}>
+                  <button className="btn" onClick={prepareBaselinePrice}>
                     Получить базовую цену
                   </button>
                 </div>
@@ -863,12 +897,11 @@ export default function AbTestsPage({
                         })
                       }}
                       placeholder="Цена"
-                      disabled={!!activeTest}
                     />
                     <button
                       className="btn"
                       onClick={() => setPriceVariants((prev) => prev.filter((_, idx) => idx !== i))}
-                      disabled={priceVariants.length <= 2 || !!activeTest}
+                      disabled={priceVariants.length <= 2}
                     >
                       Удалить
                     </button>
@@ -877,7 +910,7 @@ export default function AbTestsPage({
                 <button
                   className="btn"
                   onClick={() => setPriceVariants((prev) => (prev.length < 4 ? [...prev, 0] : prev))}
-                  disabled={priceVariants.length >= 4 || !!activeTest}
+                  disabled={priceVariants.length >= 4}
                 >
                   + Добавить вариант
                 </button>
@@ -887,21 +920,10 @@ export default function AbTestsPage({
             <div style={{ height: 12 }} />
 
             <div className="row">
-              <button className="btn primary" onClick={startTest} disabled={!!activeTest}>
+              <button className="btn primary" onClick={startTest}>
                 Запустить тест
               </button>
-              {activeTest && (
-                <button className="btn" onClick={stopTest}>
-                  Остановить и восстановить
-                </button>
-              )}
             </div>
-
-            {activeTest && winner && (
-              <div style={{ marginTop: 10 }} className="small">
-                Лидер по CTR сейчас: <strong>{winner.label}</strong>
-              </div>
-            )}
           </>
         )}
       </div>
@@ -910,176 +932,173 @@ export default function AbTestsPage({
         <div className="h3" style={{ marginTop: 0 }}>Созданные A/B тесты</div>
         <div className="ab-testsList">
           {tests.map((t, idx) => (
-            <button
-              key={t.id}
-              className={`ab-testItem ${selectedTestId === t.id ? 'is-active' : ''} ${idx % 2 === 0 ? 'is-yellow' : 'is-black'}`}
-              onClick={() => setSelectedTestId(t.id)}
-            >
-              <div>
-                <div style={{ fontWeight: 700 }}>{t.name || `A/B тест ${t.nmId}`}</div>
-                <div className="small muted">
-                  арт. продавца: {t.nmId} · {t.vendorCode ?? '—'} {t.productTitle ? `· ${t.productTitle}` : ''} · {t.type === 'photo' ? 'Фото' : 'Цена'}
+            <div key={t.id} className="ab-testGroup">
+              <div
+                className={`ab-testItem ${selectedTestId === t.id ? 'is-active' : ''} ${idx % 2 === 0 ? 'is-yellow' : 'is-black'}`}
+                onClick={() => setSelectedTestId((prev) => (prev === t.id ? null : t.id))}
+                role="button"
+                tabIndex={0}
+              >
+                <div>
+                  <div style={{ fontWeight: 700 }}>{t.name || `A/B тест ${t.nmId}`}</div>
+                  <div className="small muted">
+                    арт. продавца: {t.nmId} · {t.vendorCode ?? '—'} {t.productTitle ? `· ${t.productTitle}` : ''} · {t.type === 'photo' ? 'Фото' : 'Цена'}
+                  </div>
+                </div>
+                <div className="ab-testActions">
+                  <span className={`statusDot ${t.status === 'running' ? 'isOn' : ''}`} />
+                  {t.status === 'running' ? (
+                    <button className="btn" onClick={(e) => { e.stopPropagation(); void pauseTest(t.id) }}>Пауза</button>
+                  ) : t.status === 'paused' ? (
+                    <button className="btn primary" onClick={(e) => { e.stopPropagation(); void resumeTest(t.id) }}>Старт</button>
+                  ) : null}
+                  <button className="btn ab-stop" onClick={(e) => { e.stopPropagation(); void finishTest(t.id) }} title="Завершить тест">
+                    ✕
+                  </button>
                 </div>
               </div>
-              {t.status === 'running' ? <span className="badge">идёт</span> : null}
-            </button>
-          ))}
-          {tests.length === 0 && <div className="small muted">Пока нет тестов.</div>}
-        </div>
 
-        {displayTest ? (
-          <>
-            <div style={{ height: 12 }} />
-
-            <div className="ab-testHeader">
-              <div>
-                <div className="h3" style={{ margin: 0 }}>{displayTest.name || `A/B тест ${displayTest.nmId}`}</div>
-                <div className="small muted">
-                  Создан: {new Date(displayTest.createdAt).toLocaleString()} · статус: {displayTest.status === 'running' ? 'активен' : displayTest.status === 'paused' ? 'на паузе' : 'остановлен'}
-                </div>
-              </div>
-              {displayTest.id === activeId ? <span className="badge">текущий тест</span> : null}
-            </div>
-
-            <div className="kv">
-              <span>арт. продавца: {displayTest.nmId}</span>
-              <span>тип: {displayTest.type === 'photo' ? 'Фото' : 'Цена'}</span>
-              <span>интервал: {displayTest.slotMinutes} мин</span>
-              <span>кампаний: {displayTest.campaignIds.length}</span>
-            </div>
-
-            <div className="row" style={{ marginTop: 10, gap: 8, flexWrap: 'wrap' }}>
-              {displayTest.status === 'running' ? (
-                <button className="btn" onClick={() => pauseTest(displayTest.id)}>Пауза</button>
-              ) : displayTest.status === 'paused' ? (
-                <button className="btn primary" onClick={() => resumeTest(displayTest.id)}>Запустить</button>
-              ) : null}
-              <button className="btn ab-stop" onClick={() => finishTest(displayTest.id)} title="Завершить тест">
-                ✕
-              </button>
-            </div>
-
-            <div style={{ height: 12 }} />
-
-            <div className="list">
-              {displayTest.variants.map((v) => {
-                const m = displayTest.metrics[v.id]
-                const isActive = displayTest.status === 'running' && displayTest.activeVariantId === v.id
-                return (
-                  <div key={v.id} className="card" style={{ borderColor: isActive ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.08)' }}>
-                    <div className="row" style={{ justifyContent: 'space-between' }}>
-                      <strong>{v.label}</strong>
-                      <span className="badge">{isActive ? '✅ сейчас показывается' : ' '}</span>
-                    </div>
-                    <div className="small">
-                      Просмотры: {m?.views ?? 0} · Клики: {m?.clicks ?? 0} · CTR: {m?.ctr ?? 0}% · В корзину: {m?.atbs ?? 0} · Заказы: {m?.orders ?? 0}
+              {selectedTestId === t.id && displayTest ? (
+                <div className="ab-testDetails">
+                  <div className="ab-testHeader">
+                    <div>
+                      <div className="h3" style={{ margin: 0 }}>{displayTest.name || `A/B тест ${displayTest.nmId}`}</div>
+                      <div className="small muted">
+                        Создан: {new Date(displayTest.createdAt).toLocaleString()} · статус: {displayTest.status === 'running' ? 'активен' : displayTest.status === 'paused' ? 'на паузе' : 'остановлен'}
+                      </div>
                     </div>
                   </div>
-                )
-              })}
-            </div>
 
-            {displayTest.type === 'photo' && (
-              <>
-                <div style={{ height: 12 }} />
-                <div className="card" style={{ background: '#fafafa' }}>
-                  <strong>Фото, участвующие в тесте</strong>
-                  <div className="ab-photos">
-                    {displayTest.variants.filter((v) => v.kind === 'photo').map((v) => (
-                      <img key={v.id} src={v.coverUrl} alt={v.label} className="ab-photoTile" />
-                    ))}
-                    {displayTest.variants.filter((v) => v.kind === 'photo').length === 0 && (
-                      <div className="small muted">Фото не найдены.</div>
+                  <div className="kv">
+                    <span>арт. продавца: {displayTest.nmId}</span>
+                    <span>тип: {displayTest.type === 'photo' ? 'Фото' : 'Цена'}</span>
+                    <span>интервал: {displayTest.slotMinutes} мин</span>
+                    <span>кампаний: {displayTest.campaignIds.length}</span>
+                  </div>
+
+                  <div style={{ height: 12 }} />
+
+                  <div className="list">
+                    {displayTest.variants.map((v) => {
+                      const m = displayTest.metrics[v.id]
+                      const isActive = displayTest.status === 'running' && displayTest.activeVariantId === v.id
+                      return (
+                        <div key={v.id} className="card" style={{ borderColor: isActive ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.08)' }}>
+                          <div className="row" style={{ justifyContent: 'space-between' }}>
+                            <strong>{v.label}</strong>
+                            <span className="badge">{isActive ? '✅ сейчас показывается' : ' '}</span>
+                          </div>
+                          <div className="small">
+                            Просмотры: {m?.views ?? 0} · Клики: {m?.clicks ?? 0} · CTR: {m?.ctr ?? 0}% · В корзину: {m?.atbs ?? 0} · Заказы: {m?.orders ?? 0}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {displayTest.type === 'photo' && (
+                    <>
+                      <div style={{ height: 12 }} />
+                      <div className="card" style={{ background: '#fafafa' }}>
+                        <strong>Фото, участвующие в тесте</strong>
+                        <div className="ab-photos">
+                          {displayTest.variants.filter((v) => v.kind === 'photo').map((v) => (
+                            <img key={v.id} src={v.coverUrl} alt={v.label} className="ab-photoTile" />
+                          ))}
+                          {displayTest.variants.filter((v) => v.kind === 'photo').length === 0 && (
+                            <div className="small muted">Фото не найдены.</div>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  <div style={{ height: 12 }} />
+
+                  <div className="card" style={{ background: '#fafafa' }}>
+                    <strong>Итоги по вариантам</strong>
+                    <div className="small">Суммарные показатели за все периоды по каждому варианту.</div>
+                    <div style={{ height: 8 }} />
+                    <div className="list">
+                      {variantTotals.map(({ variant, metrics }) => (
+                        <div key={variant.id} className="card">
+                          <div style={{ fontWeight: 600 }}>{variant.label}</div>
+                          <div className="small">
+                            Показы: {metrics.views} · Клики: {metrics.clicks} · CTR: {metrics.ctr}% · В корзину: {metrics.atbs} · Заказы: {metrics.orders}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div style={{ height: 12 }} />
+
+                  <div className="card" style={{ background: '#fafafa' }}>
+                    <strong>Логи теста</strong>
+                    <div className="small">Фиксируем, какой вариант применяли и какие метрики получили за период.</div>
+                    <div style={{ height: 8 }} />
+                    <div style={{ maxHeight: 320, overflow: 'auto' }}>
+                      {historyItems.slice().reverse().map((h, idx) => {
+                        const v = h.variant
+                        const label = v?.label ?? h.variantId
+                        return (
+                          <div key={idx} className="ab-log">
+                            {v?.kind === 'photo' && v.coverUrl ? (
+                              <img src={v.coverUrl} alt={label} className="ab-thumb" />
+                            ) : (
+                              <div className="ab-thumb ab-thumb--price">₽</div>
+                            )}
+                            <div>
+                              <div style={{ fontWeight: 600 }}>{label}</div>
+                              <div className="small muted">{new Date(h.ts).toLocaleString()}</div>
+                              <div className="small">
+                                Показы: {h.delta.views} · Клики: {h.delta.clicks} · Заказы: {h.delta.orders}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                      {historyItems.length === 0 && <div className="small muted">Пока нет данных.</div>}
+                    </div>
+                  </div>
+
+                  <div style={{ height: 12 }} />
+
+                  <div className="card" style={{ background: '#fafafa' }}>
+                    <strong>График по интервалам</strong>
+                    <div className="small">Каждый столбец — один тестовый промежуток, высота по показам.</div>
+                    <div style={{ height: 8 }} />
+                    {historyItems.length > 0 ? (
+                      <div className="ab-chart">
+                        {(() => {
+                          const maxViews = Math.max(1, ...historyItems.map((h) => h.delta.views))
+                          return historyItems.map((h, i) => {
+                            const v = h.variant
+                            const heightPct = Math.max(8, Math.round((h.delta.views / maxViews) * 100))
+                            return (
+                              <div key={i} className="ab-bar">
+                                <div className="ab-barFill" style={{ height: `${heightPct}%` }} />
+                                {v?.kind === 'photo' && v.coverUrl ? (
+                                  <img src={v.coverUrl} alt={v.label} className="ab-barThumb" />
+                                ) : (
+                                  <div className="ab-barLabel">{v?.kind === 'price' ? `₽${v.price}` : '—'}</div>
+                                )}
+                                <div className="ab-barValue">{h.delta.views}</div>
+                              </div>
+                            )
+                          })
+                        })()}
+                      </div>
+                    ) : (
+                      <div className="small muted">Нет данных для графика.</div>
                     )}
                   </div>
                 </div>
-              </>
-            )}
-
-            <div style={{ height: 12 }} />
-
-            <div className="card" style={{ background: '#fafafa' }}>
-              <strong>Итоги по вариантам</strong>
-              <div className="small">Суммарные показатели за все периоды по каждому варианту.</div>
-              <div style={{ height: 8 }} />
-              <div className="list">
-                {variantTotals.map(({ variant, metrics }) => (
-                  <div key={variant.id} className="card">
-                    <div style={{ fontWeight: 600 }}>{variant.label}</div>
-                    <div className="small">
-                      Показы: {metrics.views} · Клики: {metrics.clicks} · CTR: {metrics.ctr}% · В корзину: {metrics.atbs} · Заказы: {metrics.orders}
-                    </div>
-                  </div>
-                ))}
-              </div>
+              ) : null}
             </div>
-
-            <div style={{ height: 12 }} />
-
-            <div className="card" style={{ background: '#fafafa' }}>
-              <strong>Логи теста</strong>
-              <div className="small">Фиксируем, какой вариант применяли и какие метрики получили за период.</div>
-              <div style={{ height: 8 }} />
-              <div style={{ maxHeight: 320, overflow: 'auto' }}>
-                {historyItems.slice().reverse().map((h, idx) => {
-                  const v = h.variant
-                  const label = v?.label ?? h.variantId
-                  return (
-                    <div key={idx} className="ab-log">
-                      {v?.kind === 'photo' && v.coverUrl ? (
-                        <img src={v.coverUrl} alt={label} className="ab-thumb" />
-                      ) : (
-                        <div className="ab-thumb ab-thumb--price">₽</div>
-                      )}
-                      <div>
-                        <div style={{ fontWeight: 600 }}>{label}</div>
-                        <div className="small muted">{new Date(h.ts).toLocaleString()}</div>
-                        <div className="small">
-                          Показы: {h.delta.views} · Клики: {h.delta.clicks} · Заказы: {h.delta.orders}
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-                {historyItems.length === 0 && <div className="small muted">Пока нет данных.</div>}
-              </div>
-            </div>
-
-            <div style={{ height: 12 }} />
-
-            <div className="card" style={{ background: '#fafafa' }}>
-              <strong>График по интервалам</strong>
-              <div className="small">Каждый столбец — один тестовый промежуток, высота по показам.</div>
-              <div style={{ height: 8 }} />
-              {historyItems.length > 0 ? (
-                <div className="ab-chart">
-                  {(() => {
-                    const maxViews = Math.max(1, ...historyItems.map((h) => h.delta.views))
-                    return historyItems.map((h, i) => {
-                      const v = h.variant
-                      const heightPct = Math.max(8, Math.round((h.delta.views / maxViews) * 100))
-                      return (
-                        <div key={i} className="ab-bar">
-                          <div className="ab-barFill" style={{ height: `${heightPct}%` }} />
-                          {v?.kind === 'photo' && v.coverUrl ? (
-                            <img src={v.coverUrl} alt={v.label} className="ab-barThumb" />
-                          ) : (
-                            <div className="ab-barLabel">{v?.kind === 'price' ? `₽${v.price}` : '—'}</div>
-                          )}
-                          <div className="ab-barValue">{h.delta.views}</div>
-                        </div>
-                      )
-                    })
-                  })()}
-                </div>
-              ) : (
-                <div className="small muted">Нет данных для графика.</div>
-              )}
-            </div>
-          </>
-        ) : (
-          <div className="small muted">Нет активного теста. Запустите тест слева.</div>
-        )}
+          ))}
+          {tests.length === 0 && <div className="small muted">Пока нет тестов.</div>}
+        </div>
       </div>
     </div>
   )

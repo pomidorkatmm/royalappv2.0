@@ -466,8 +466,8 @@ function AppInner() {
       <div className="header">
         <div className="brand">
           <div className="brandTop">
-            <h1>WB Seller Tools</h1>
-            <span className="badge brandBadge">Royal Charms</span>
+            <h1>Royal Charms</h1>
+            <span className="badge brandBadge">local</span>
           </div>
           <div className="brandSub">
             <span className="brandTyping">расширение для Wildberries</span>
@@ -475,8 +475,8 @@ function AppInner() {
           </div>
           <div className="brandStory">
             <span className="brandWb">WB</span>
-            <span className="brandRunner">🧍‍♂️👜</span>
-            <span className="brandHome">🏠</span>
+            <span className="brandRunner" aria-hidden="true" />
+            <span className="brandHome" aria-hidden="true" />
           </div>
         </div>
 
@@ -523,10 +523,6 @@ function AppInner() {
               </div>
             )}
           </div>
-
-          <button className="btn" onClick={() => setApiModalOpen(true)}>
-            API токены
-          </button>
 
           <div style={{ position: 'relative' }}>
             <button className="btn" onClick={() => setAutoRefreshUiOpen((v) => !v)}>

@@ -28,7 +28,10 @@ export type AbVariantMetrics = AbTotals & {
 export type AbTest = {
   id: string
   createdAt: string
+  name: string
   nmId: number
+  vendorCode?: string
+  productTitle?: string
   type: AbTestType
   slotMinutes: number
   campaignIds: number[]
@@ -42,7 +45,7 @@ export type AbTest = {
 
   variants: AbVariant[]
   activeVariantId?: string
-  status: 'draft' | 'running' | 'stopped'
+  status: 'draft' | 'running' | 'paused' | 'stopped'
 
   lastTotals?: AbTotals
   metrics: Record<string, AbVariantMetrics>

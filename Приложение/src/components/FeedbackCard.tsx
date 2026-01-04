@@ -179,7 +179,7 @@ export default function FeedbackCard({
           </div>
         </div>
         <div className="kv">
-          {nmId ? <span>nmId: {nmId}</span> : <span>nmId: —</span>}
+          {nmId ? <span>арт. продавца: {nmId}</span> : <span>арт. продавца: —</span>}
           <span>{hasAnswer ? 'есть ответ' : 'нет ответа'}</span>
         </div>
       </div>

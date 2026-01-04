@@ -245,7 +245,8 @@ export default function StockTransfersPage({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone }),
       })
-      const data = await r.json()
+      const text = await r.text()
+      const data = text ? JSON.parse(text) : {}
       if (!r.ok) throw new Error(data?.error || 'phone_start_failed')
       setPhoneSession(data.sessionId)
       setLoginStatus('idle')
@@ -265,7 +266,8 @@ export default function StockTransfersPage({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId: phoneSession, code: phoneCode }),
       })
-      const data = await r.json()
+      const text = await r.text()
+      const data = text ? JSON.parse(text) : {}
       if (!r.ok) throw new Error(data?.error || 'phone_confirm_failed')
       setLoginStatus('ok')
       push('Авторизация прошла успешно')

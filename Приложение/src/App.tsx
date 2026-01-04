@@ -9,6 +9,7 @@ import AdsSchedulerPage from './features/adsScheduler/AdsSchedulerPage'
 import { UnitEconomyPage } from './features/unitEconomy/UnitEconomyPage'
 import StockTransfersPage from './features/stockTransfers/StockTransfersPage'
 import ApiTokensModal from './features/accounts/ApiTokensModal'
+import StockTransfersPage from './features/stockTransfers/StockTransfersPage'
 import { ensureMigrationFromLegacy, getActiveAccountId, loadAccounts, saveAccounts, setActiveAccountId, type WbAccount } from './features/accounts/accountsStorage'
 import { AUTO_REPLY_TEMPLATE_EXAMPLE, DEFAULTS, STORAGE_KEYS } from './config'
 import {

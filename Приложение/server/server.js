@@ -3,6 +3,7 @@ import compression from 'compression'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { startPhoneLogin, confirmPhoneLogin } from './stockTransfer/phoneAuth.js'
+import { StockTransferService } from './stockTransfer/stockTransferService.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -10,6 +11,8 @@ const __dirname = path.dirname(__filename)
 const app = express()
 app.use(compression())
 app.use(express.json())
+
+const stockTransferService = new StockTransferService()
 
 app.post('/api/wb/login/start', async (req, res) => {
   try {
@@ -30,6 +33,36 @@ app.post('/api/wb/login/confirm', async (req, res) => {
     res.json(result)
   } catch (e) {
     res.status(500).json({ error: 'confirm_failed', detail: String(e?.message ?? e) })
+  }
+})
+
+app.post('/api/stock-transfer/login', async (req, res) => {
+  try {
+    const { login, password } = req.body || {}
+    if (!login || !password) return res.status(400).json({ error: 'login_or_password_required' })
+    const result = await stockTransferService.login({ login, password })
+    res.json(result)
+  } catch (e) {
+    res.status(500).json({ error: 'login_failed', detail: String(e?.message ?? e) })
+  }
+})
+
+app.get('/api/stock-transfer/stocks', async (_req, res) => {
+  try {
+    const result = await stockTransferService.fetchStocksReport()
+    res.json(result)
+  } catch (e) {
+    res.status(500).json({ error: 'stocks_failed', detail: String(e?.message ?? e) })
+  }
+})
+
+app.post('/api/stock-transfer/execute', async (req, res) => {
+  try {
+    const { tasks } = req.body || {}
+    const result = await stockTransferService.executeTransfers(tasks || [])
+    res.json(result)
+  } catch (e) {
+    res.status(500).json({ error: 'execute_failed', detail: String(e?.message ?? e) })
   }
 })
 

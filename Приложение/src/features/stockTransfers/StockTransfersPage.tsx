@@ -60,6 +60,10 @@ export default function StockTransfersPage({
   const [suggestions, setSuggestions] = useState<TransferSuggestion[]>([])
   const [jobs, setJobs] = useState<TransferJob[]>([])
   const [lastSync, setLastSync] = useState<number | null>(null)
+  const [login, setLogin] = useState('')
+  const [password, setPassword] = useState('')
+  const [loginStatus, setLoginStatus] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle')
+  const [logs, setLogs] = useState<Array<{ ts: string; level: string; message: string }>>([])
 
   function loadCache() {
     try {
@@ -201,6 +205,53 @@ export default function StockTransfersPage({
     return () => window.clearInterval(t)
   }, [])
 
+  async function loginToPortal() {
+    if (!login || !password) return
+    setLoginStatus('loading')
+    try {
+      const r = await fetch('/api/stock-transfer/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ login, password }),
+      })
+      const data = await r.json()
+      if (!r.ok) throw new Error(data?.error || 'login_failed')
+      setLoginStatus('ok')
+      push('Авторизация успешна')
+    } catch (e: any) {
+      setLoginStatus('error')
+      push(`Ошибка входа: ${String(e?.message ?? e)}`)
+    }
+  }
+
+  async function loadStocksFromPortal() {
+    try {
+      const r = await fetch('/api/stock-transfer/stocks')
+      const data = await r.json()
+      setLogs(data.logs ?? [])
+      if (!r.ok || data.status !== 'ok') throw new Error(data?.message || data?.error || 'stocks_failed')
+      push('Отчет по остаткам загружен через портал')
+    } catch (e: any) {
+      push(`Ошибка отчета: ${String(e?.message ?? e)}`)
+    }
+  }
+
+  async function executeTransfersFromPortal() {
+    try {
+      const r = await fetch('/api/stock-transfer/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tasks: suggestions }),
+      })
+      const data = await r.json()
+      setLogs(data.logs ?? [])
+      if (!r.ok || data.status !== 'ok') throw new Error(data?.message || data?.error || 'execute_failed')
+      push('Заявки поставлены в очередь')
+    } catch (e: any) {
+      push(`Ошибка отправки: ${String(e?.message ?? e)}`)
+    }
+  }
+
   return (
     <div className="card">
       <div className="row" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
@@ -208,13 +259,35 @@ export default function StockTransfersPage({
           <div className="h2">Перемещение остатков</div>
           <div className="small muted">Сбор остатков и автоматические рекомендации по перераспределению.</div>
         </div>
-        <button className="btn" onClick={loadData} disabled={loading}>
-          {loading ? 'Загрузка…' : 'Обновить данные'}
-        </button>
+        <div className="row">
+          <button className="btn" onClick={loadData} disabled={loading}>
+            {loading ? 'Загрузка…' : 'Обновить данные'}
+          </button>
+          <button className="btn" onClick={loadStocksFromPortal}>
+            Обновить через портал
+          </button>
+        </div>
       </div>
 
       <div className="small" style={{ marginTop: 6 }}>
         Последнее обновление: {lastSync ? new Date(lastSync).toLocaleString() : '—'}
+      </div>
+
+      <div style={{ height: 12 }} />
+
+      <div className="card" style={{ background: '#fafafa' }}>
+        <div style={{ fontWeight: 700 }}>Авторизация в Wildberries Seller</div>
+        <div className="small muted">Войдите, чтобы парсить отчет и отправлять заявки через интерфейс WB.</div>
+        <div className="row" style={{ marginTop: 8 }}>
+          <input className="input" placeholder="Логин" value={login} onChange={(e) => setLogin(e.target.value)} />
+          <input className="input" placeholder="Пароль" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <button className="btn primary" onClick={loginToPortal}>
+            Войти
+          </button>
+        </div>
+        <div className="small muted" style={{ marginTop: 6 }}>
+          Статус: {loginStatus === 'loading' ? 'Ожидание' : loginStatus === 'ok' ? 'Авторизация успешна' : loginStatus === 'error' ? 'Ошибка входа' : 'Ожидание'}
+        </div>
       </div>
 
       <div style={{ height: 12 }} />
@@ -264,6 +337,11 @@ export default function StockTransfersPage({
         <strong>Очередь заявок</strong>
         <div className="small muted">Автоматизация формируется в фоне. Для отправки требуется модуль автоматизации.</div>
         <div style={{ height: 8 }} />
+        <div className="row" style={{ marginBottom: 8 }}>
+          <button className="btn" onClick={executeTransfersFromPortal}>
+            Отправить через портал
+          </button>
+        </div>
         <div className="list">
           {jobs.length === 0 && <div className="small muted">Очередь пуста.</div>}
           {jobs.map((job) => (
@@ -273,6 +351,21 @@ export default function StockTransfersPage({
                 {job.fromWarehouse} → {job.toWarehouse}, {job.qty} шт · статус: {job.status}
               </div>
               {job.message && <div className="small muted">{job.message}</div>}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ height: 16 }} />
+
+      <div className="card" style={{ background: '#fafafa' }}>
+        <strong>Логи авторизации и действий</strong>
+        <div style={{ height: 8 }} />
+        <div className="list">
+          {logs.length === 0 && <div className="small muted">Логи не найдены.</div>}
+          {logs.map((log, idx) => (
+            <div key={idx} className="small">
+              [{new Date(log.ts).toLocaleString()}] {log.level}: {log.message}
             </div>
           ))}
         </div>

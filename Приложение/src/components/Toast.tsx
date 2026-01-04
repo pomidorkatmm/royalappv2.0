@@ -13,7 +13,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     setItems((prev) => [it, ...prev].slice(0, 5))
     window.setTimeout(() => {
       setItems((prev) => prev.filter((x) => x.id !== id))
-    }, 1500)
+    }, 5000)
   }, [])
 
   const value = useMemo(() => ({ push }), [push])

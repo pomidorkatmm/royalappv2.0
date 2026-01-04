@@ -7,6 +7,7 @@ import AutoReplyPanel from './components/AutoReplyPanel'
 import AbTestsPage from './abTests/AbTestsPage'
 import AdsSchedulerPage from './features/adsScheduler/AdsSchedulerPage'
 import { UnitEconomyPage } from './features/unitEconomy/UnitEconomyPage'
+import StockTransfersPage from './features/stockTransfers/StockTransfersPage'
 import ApiTokensModal from './features/accounts/ApiTokensModal'
 import { ensureMigrationFromLegacy, getActiveAccountId, loadAccounts, saveAccounts, setActiveAccountId, type WbAccount } from './features/accounts/accountsStorage'
 import { AUTO_REPLY_TEMPLATE_EXAMPLE, DEFAULTS, STORAGE_KEYS } from './config'
@@ -104,7 +105,7 @@ function AppInner() {
   }, [autoRefreshMs])
 
   // ---- app state ----
-  const [tab, setTab] = useState<'reviews' | 'adsScheduler' | 'unitEconomy' | 'abtests'>('reviews')
+  const [tab, setTab] = useState<'reviews' | 'adsScheduler' | 'unitEconomy' | 'abtests' | 'stockTransfers'>('reviews')
   const [loading, setLoading] = useState(false)
   const [fatalError, setFatalError] = useState<string>('')
 
@@ -563,6 +564,9 @@ function AppInner() {
           </button>
           <button className={tab === 'abtests' ? 'btn primary' : 'btn'} onClick={() => setTab('abtests')}>
             A/B
+          </button>
+          <button className={tab === 'stockTransfers' ? 'btn primary' : 'btn'} onClick={() => setTab('stockTransfers')}>
+            Перемещение остатков
           </button>
         </div>
       </div>

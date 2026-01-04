@@ -47,6 +47,15 @@ app.post('/api/stock-transfer/login', async (req, res) => {
   }
 })
 
+app.post('/api/stock-transfer/manual/start', async (_req, res) => {
+  try {
+    const result = await stockTransferService.startManualLogin()
+    res.json(result)
+  } catch (e) {
+    res.status(500).json({ error: 'manual_login_failed', detail: String(e?.message ?? e) })
+  }
+})
+
 app.post('/api/stock-transfer/phone/start', async (req, res) => {
   try {
     const { phone } = req.body || {}

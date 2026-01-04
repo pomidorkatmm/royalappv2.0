@@ -68,6 +68,7 @@ export default function StockTransfersPage({
   const [phoneSession, setPhoneSession] = useState<string | null>(null)
   const [smsStatus, setSmsStatus] = useState('Ожидание запроса SMS-кода')
   const [smsCooldownUntil, setSmsCooldownUntil] = useState<number | null>(null)
+  const [manualStatus, setManualStatus] = useState('Ожидание входа')
   const [logs, setLogs] = useState<Array<{ ts: string; level: string; message: string }>>([])
   const [plan, setPlan] = useState<Array<{ skuKey: string; fromWarehouse: string; toWarehouse: string; qty: number }>>([])
 
@@ -238,6 +239,20 @@ export default function StockTransfersPage({
     }
   }
 
+  async function startManualLogin() {
+    setManualStatus('Ожидание входа')
+    try {
+      const r = await fetch('/api/stock-transfer/manual/start', { method: 'POST' })
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(data?.error || 'manual_login_failed')
+      setManualStatus('Авторизация прошла успешно')
+      push('Авторизация прошла успешно')
+    } catch (e: any) {
+      setManualStatus(`Ошибка: ${String(e?.message ?? e)}`)
+      push(`Ошибка авторизации: ${String(e?.message ?? e)}`)
+    }
+  }
+
   async function requestSmsCode() {
     if (!phone) return
     const now = Date.now()
@@ -343,6 +358,19 @@ export default function StockTransfersPage({
       <div className="card" style={{ background: '#fafafa' }}>
         <div style={{ fontWeight: 700 }}>Авторизация в Wildberries Seller</div>
         <div className="small muted">Войдите по телефону или логину, чтобы парсить отчет и отправлять заявки.</div>
+        <div className="card" style={{ marginTop: 8 }}>
+          <div className="small muted">
+            Откройте браузер → выполните вход вручную с номером телефона и SMS-кодом → дождитесь подтверждения.
+          </div>
+          <div className="row" style={{ marginTop: 8 }}>
+            <button className="btn primary" onClick={startManualLogin}>
+              Открыть браузер для входа Wildberries
+            </button>
+          </div>
+          <div className="small muted" style={{ marginTop: 6 }}>
+            Статус: {manualStatus}
+          </div>
+        </div>
         <div className="row" style={{ marginTop: 8 }}>
           <input className="input" placeholder="Номер телефона" value={phone} onChange={(e) => setPhone(e.target.value)} />
           <button className="btn" onClick={requestSmsCode}>

@@ -13,6 +13,26 @@ export class BrowserManager {
     return { browser, context, page }
   }
 
+  async openManualLogin({ timeoutMs = 180000 } = {}) {
+    this.logger.info('[BrowserManager] запуск ручного входа')
+    const browser = await chromium.launch({ headless: false })
+    const context = await browser.new_context()
+    const page = await context.new_page()
+    await page.goto('https://seller.wildberries.ru/', { wait_until: 'load' })
+    const authSelector = 'nav, header, [data-menu], [class*="sidebar"], text=/аналитика/i'
+    try {
+      await page.wait_for_selector(authSelector, { timeout: timeoutMs })
+      const storage = await context.storage_state()
+      this.logger.info('[BrowserManager] ручной вход подтвержден')
+      return { status: 'ok', storage }
+    } catch (e) {
+      this.logger.error('[BrowserManager] ручной вход не подтвержден', e)
+      throw new Error('manual_login_timeout')
+    } finally {
+      await browser.close()
+    }
+  }
+
   async login({ login, password }) {
     this.logger.info('[BrowserManager] старт логина')
     const browser = await chromium.launch({ headless: this.headless })

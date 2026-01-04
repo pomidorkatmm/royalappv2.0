@@ -32,6 +32,22 @@ export class StockTransferService {
     }
   }
 
+  async startManualLogin() {
+    this.status = 'loading'
+    this.log('Открываем браузер для ручного входа')
+    try {
+      const result = await this.manager.openManualLogin({ timeoutMs: 180000 })
+      this.session = result.storage
+      this.status = 'ok'
+      this.log('Авторизация вручную подтверждена')
+      return { status: 'ok' }
+    } catch (e) {
+      this.status = 'error'
+      this.log(`Ошибка ручного входа: ${String(e?.message ?? e)}`, 'error')
+      throw e
+    }
+  }
+
   async startPhoneLogin(phone) {
     this.status = 'loading'
     this.log('Запрос SMS-кода для входа')

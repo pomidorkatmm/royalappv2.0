@@ -7,6 +7,7 @@ import AutoReplyPanel from './components/AutoReplyPanel'
 import AbTestsPage from './abTests/AbTestsPage'
 import AdsSchedulerPage from './features/adsScheduler/AdsSchedulerPage'
 import { UnitEconomyPage } from './features/unitEconomy/UnitEconomyPage'
+import StockTransfersPage from './features/stockTransfers/StockTransfersPage'
 import ApiTokensModal from './features/accounts/ApiTokensModal'
 import { ensureMigrationFromLegacy, getActiveAccountId, loadAccounts, saveAccounts, setActiveAccountId, type WbAccount } from './features/accounts/accountsStorage'
 import { AUTO_REPLY_TEMPLATE_EXAMPLE, DEFAULTS, STORAGE_KEYS } from './config'
@@ -104,7 +105,7 @@ function AppInner() {
   }, [autoRefreshMs])
 
   // ---- app state ----
-  const [tab, setTab] = useState<'reviews' | 'adsScheduler' | 'unitEconomy' | 'abtests'>('reviews')
+  const [tab, setTab] = useState<'reviews' | 'adsScheduler' | 'unitEconomy' | 'abtests' | 'stockTransfers'>('reviews')
   const [loading, setLoading] = useState(false)
   const [fatalError, setFatalError] = useState<string>('')
 
@@ -118,6 +119,7 @@ function AppInner() {
   const [items, setItems] = useState<FeedbackVm[]>([])
   const [autoReplying, setAutoReplying] = useState(false)
   const [autoReplyProgress, setAutoReplyProgress] = useState<{ done: number; total: number } | null>(null)
+  const [storeMenuOpen, setStoreMenuOpen] = useState(false)
   const [autoPanelOpen, setAutoPanelOpen] = useState(false)
 
   const [autoRules, setAutoRules] = useState<AutoReplyRule[]>(() => {
@@ -315,13 +317,12 @@ function AppInner() {
   // автообновление
   useEffect(() => {
     if (!sellerToken) return
-    if (tab !== 'reviews') return
     const t = window.setInterval(() => {
       void refresh()
     }, autoRefreshMs)
     return () => window.clearInterval(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sellerToken, autoRefreshMs, tab, filters])
+  }, [sellerToken, autoRefreshMs, filters])
 
   useEffect(() => {
     // при смене аккаунта — чистим список и ошибки
@@ -408,6 +409,22 @@ function AppInner() {
           try {
             window.dispatchEvent(new CustomEvent('wb:answered', { detail: { id: dto.id } }))
           } catch {}
+          setItems((prev) =>
+            prev.map((item) =>
+              item.dto.id === dto.id
+                ? {
+                    ...item,
+                    answerDraft: text,
+                    lastSentAnswer: text,
+                    sendStatus: { kind: 'sent' },
+                    dto: {
+                      ...item.dto,
+                      answer: { text, state: item.dto.answer?.state ?? 'wbRu', editable: item.dto.answer?.editable ?? false },
+                    },
+                  }
+                : item,
+            ),
+          )
           done += 1
           setAutoReplyProgress({ done, total: targets.length })
         } catch (e) {
@@ -448,30 +465,64 @@ function AppInner() {
 
       <div className="header">
         <div className="brand">
-          <h1>WB Seller Tools</h1>
-          <span className="badge">local</span>
+          <div className="brandTop">
+            <h1>Royal Charms</h1>
+            <span className="badge brandBadge">local</span>
+          </div>
+          <div className="brandSub">
+            <span className="brandTyping">расширение для Wildberries</span>
+            <span className="brandCursor">▍</span>
+          </div>
+          <div className="brandStory">
+            <span className="brandWb">WB</span>
+            <span className="brandRunner" aria-hidden="true" />
+            <span className="brandHome" aria-hidden="true" />
+          </div>
         </div>
 
-        <div className="row" style={{ gap: 8 }}>
-          <select
-            className="select"
-            value={activeAccount?.id ?? ''}
-            onChange={(e) => {
-              const id = e.target.value
-              setActiveId(id)
-              setActiveAccountId(id)
-            }}
-          >
-            {accounts.map((a: WbAccount) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </select>
-
-          <button className="btn" onClick={() => setApiModalOpen(true)}>
-            API токены
-          </button>
+        <div className="headerTop">
+          <div style={{ position: 'relative' }}>
+            <button
+              className="btn storeButton"
+              onClick={() => {
+                if (accounts.length === 0) {
+                  setApiModalOpen(true)
+                  return
+                }
+                setStoreMenuOpen((v) => !v)
+              }}
+            >
+              {activeAccount?.name ?? '+'}
+            </button>
+            {storeMenuOpen && (
+              <div className="popover storeMenu" onMouseLeave={() => setStoreMenuOpen(false)}>
+                <div className="small muted" style={{ marginBottom: 8 }}>Магазины</div>
+                <div className="storeList">
+                  {accounts.map((a: WbAccount) => (
+                    <button
+                      key={a.id}
+                      className={`btn storeOption ${activeAccount?.id === a.id ? 'isActive' : ''}`}
+                      onClick={() => {
+                        setActiveId(a.id)
+                        setActiveAccountId(a.id)
+                        setStoreMenuOpen(false)
+                      }}
+                    >
+                      {a.name}
+                    </button>
+                  ))}
+                </div>
+                <div className="storeMenuActions">
+                  <button className="btn" onClick={() => { setApiModalOpen(true); setStoreMenuOpen(false) }}>
+                    API токены магазина
+                  </button>
+                  <button className="btn storeAdd" onClick={() => { setApiModalOpen(true); setStoreMenuOpen(false) }}>
+                    +
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
           <div style={{ position: 'relative' }}>
             <button className="btn" onClick={() => setAutoRefreshUiOpen((v) => !v)}>
@@ -499,7 +550,9 @@ function AppInner() {
               </div>
             )}
           </div>
+        </div>
 
+        <div className="headerNav">
           <button className={tab === 'reviews' ? 'btn primary' : 'btn'} onClick={() => setTab('reviews')}>
             Отзывы
           </button>
@@ -511,6 +564,9 @@ function AppInner() {
           </button>
           <button className={tab === 'abtests' ? 'btn primary' : 'btn'} onClick={() => setTab('abtests')}>
             A/B
+          </button>
+          <button className={tab === 'stockTransfers' ? 'btn primary' : 'btn'} onClick={() => setTab('stockTransfers')}>
+            Перемещение остатков
           </button>
         </div>
       </div>
@@ -526,7 +582,7 @@ function AppInner() {
         progress={autoReplyProgress}
       />
 
-      {tab === 'reviews' && (
+      <div className={`tabPane ${tab === 'reviews' ? '' : 'isHidden'}`}>
         <>
           <FiltersBar
             value={filters}
@@ -607,9 +663,9 @@ function AppInner() {
             </div>
           )}
         </>
-      )}
+      </div>
 
-      {tab === 'adsScheduler' && (
+      <div className={`tabPane ${tab === 'adsScheduler' ? '' : 'isHidden'}`}>
         <>
           {!adsToken ? (
             <div className="card">
@@ -627,22 +683,102 @@ function AppInner() {
             <AdsSchedulerPage accountId={activeAccount?.id ?? 'default'} adsToken={adsToken} />
           )}
         </>
-      )}
+      </div>
 
+      <div className={`tabPane ${tab === 'unitEconomy' ? '' : 'isHidden'}`}>
+        <UnitEconomyPage accountId={activeAccount?.id ?? 'default'} />
+      </div>
 
-      {tab === 'unitEconomy' && <UnitEconomyPage accountId={activeAccount?.id ?? 'default'} />}
+      <div className={`tabPane ${tab === 'abtests' ? '' : 'isHidden'}`}>
+        <AbTestsPage sellerToken={sellerToken} adsToken={adsToken || null} openApiStrategyId={openApiStrategyId} />
+      </div>
 
-      {tab === 'abtests' && <AbTestsPage sellerToken={sellerToken} adsToken={adsToken || null} openApiStrategyId={openApiStrategyId} />}
+      <div className={`tabPane ${tab === 'stockTransfers' ? '' : 'isHidden'}`}>
+        <StockTransfersPage
+          accountId={activeAccount?.id ?? 'default'}
+          sellerToken={sellerToken}
+          openApiStrategyId={openApiStrategyId}
+        />
+      </div>
     </div>
   )
 }
 
 export default function App() {
   const [ready, setReady] = useState(false)
+  const [phone, setPhone] = useState(() => localStorage.getItem('wb_phone_auth') || '')
+  const [phoneAuth, setPhoneAuth] = useState(() => Boolean(localStorage.getItem('wb_phone_auth_ok')))
+  const [phoneSession, setPhoneSession] = useState<string | null>(null)
+  const [phoneCode, setPhoneCode] = useState('')
+  const [phoneLoading, setPhoneLoading] = useState(false)
+  const [phoneError, setPhoneError] = useState('')
   return (
     <ToastProvider>
       {!ready && <SplashScreen ms={2000} onDone={() => setReady(true)} />}
-      {ready && <AppInner />}
+      {ready && !phoneAuth && (
+        <div className="authOverlay">
+          <div className="card authCard">
+            <div className="h2">Авторизация по номеру телефона</div>
+            <div className="small muted">
+              Подключитесь по номеру телефона, чтобы продолжить работу в приложении.
+            </div>
+            <input
+              className="input"
+              placeholder="+7 (___) ___-__-__"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+            />
+            {phoneSession && (
+              <input
+                className="input"
+                placeholder="Код из SMS"
+                value={phoneCode}
+                onChange={(e) => setPhoneCode(e.target.value)}
+              />
+            )}
+            {phoneError && <div className="small error">{phoneError}</div>}
+            <button
+              className="btn primary"
+              disabled={phoneLoading}
+              onClick={async () => {
+                if (phone.trim().length < 10) return
+                setPhoneLoading(true)
+                setPhoneError('')
+                try {
+                  if (!phoneSession) {
+                    const r = await fetch('/api/wb/login/start', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ phone: phone.trim() }),
+                    })
+                    const data = await r.json()
+                    if (!r.ok) throw new Error(data?.error || 'start_failed')
+                    setPhoneSession(data.sessionId)
+                    localStorage.setItem('wb_phone_auth', phone.trim())
+                    return
+                  }
+                  const r = await fetch('/api/wb/login/confirm', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionId: phoneSession, code: phoneCode.trim() }),
+                  })
+                  const data = await r.json()
+                  if (!r.ok) throw new Error(data?.error || 'confirm_failed')
+                  localStorage.setItem('wb_phone_auth_ok', '1')
+                  setPhoneAuth(true)
+                } catch (e) {
+                  setPhoneError(String(e?.message ?? e))
+                } finally {
+                  setPhoneLoading(false)
+                }
+              }}
+            >
+              {phoneSession ? 'Подтвердить код' : 'Подключиться по номеру телефона'}
+            </button>
+          </div>
+        </div>
+      )}
+      {ready && phoneAuth && <AppInner />}
     </ToastProvider>
   )
 }

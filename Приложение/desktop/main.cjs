@@ -37,6 +37,7 @@ function createWindow(url) {
       // Нам не нужен nodeIntegration; приложение работает как обычный веб.
       nodeIntegration: false,
       contextIsolation: true,
+      webviewTag: true,
     },
   });
 

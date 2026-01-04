@@ -1,160 +1,122 @@
-import { BrowserManager } from './browserManager.js'
-import { startPhoneLogin, confirmPhoneLogin } from './phoneAuth.js'
+import { chromium } from 'playwright'
+
+const SESSION = { cookies: [], localStorage: {}, sessionStorage: {} }
+
+function log(message) {
+  const entry = { ts: new Date().toISOString(), message }
+  console.log('[StockTransfer]', message)
+  return entry
+}
+
+function buildStorageState() {
+  return {
+    cookies: SESSION.cookies,
+    origins: [
+      {
+        origin: 'https://seller.wildberries.ru',
+        localStorage: Object.entries(SESSION.localStorage).map(([name, value]) => ({ name, value })),
+      },
+    ],
+  }
+}
 
 export class StockTransferService {
   constructor() {
-    this.manager = new BrowserManager({ headless: true })
-    this.session = null
-    this.status = 'idle'
     this.logs = []
-    this.manualSessionId = null
   }
 
-  log(message, level = 'info') {
-    const entry = { ts: new Date().toISOString(), level, message }
-    this.logs.push(entry)
-    if (level === 'error') console.error('[StockTransfer]', message)
-    else console.log('[StockTransfer]', message)
+  saveSession(payload) {
+    SESSION.cookies = payload.cookies || []
+    SESSION.localStorage = payload.localStorage || {}
+    SESSION.sessionStorage = payload.sessionStorage || {}
+    this.logs.push(log('Сессия сохранена'))
+    return { status: 'ok' }
   }
 
-  async login({ login, password }) {
-    this.status = 'loading'
-    this.log('Старт авторизации в seller.wildberries.ru')
+  async withSessionPage() {
+    const browser = await chromium.launch({ headless: true })
+    const context = await browser.new_context({ storage_state: buildStorageState() })
+    const page = await context.new_page()
+    await page.add_init_script((data) => {
+      const entries = data?.sessionStorage ? Object.entries(data.sessionStorage) : []
+      for (const [k, v] of entries) sessionStorage.setItem(k, String(v))
+    }, { sessionStorage: SESSION.sessionStorage })
+    return { browser, page }
+  }
+
+  async fetchStocks() {
+    const { browser, page } = await this.withSessionPage()
+    const logs = []
     try {
-      const result = await this.manager.login({ login, password })
-      this.session = result.storage
-      this.status = 'ok'
-      this.log('Авторизация успешна')
-      return { status: 'ok' }
-    } catch (e) {
-      this.status = 'error'
-      this.log(`Ошибка входа: ${String(e?.message ?? e)}`, 'error')
-      throw e
-    }
-  }
-
-  async startManualLogin() {
-    this.status = 'loading'
-    this.log('Открываем браузер для ручного входа')
-    try {
-      const manualId = `${Date.now()}_${Math.random().toString(16).slice(2)}`
-      this.manualSessionId = manualId
-      this.manager.openManualLogin({
-        timeoutMs: 180000,
-        onSuccess: async (storage) => {
-          this.session = storage
-          this.status = 'ok'
-          this.log('Авторизация вручную подтверждена')
-        },
-      }).catch((e) => {
-        this.status = 'error'
-        this.log(`Ошибка ручного входа: ${String(e?.message ?? e)}`, 'error')
-      })
-      return { status: 'pending', sessionId: manualId }
-    } catch (e) {
-      this.status = 'error'
-      this.log(`Ошибка ручного входа: ${String(e?.message ?? e)}`, 'error')
-      throw e
-    }
-  }
-
-  getManualStatus(sessionId) {
-    if (!this.manualSessionId || this.manualSessionId !== sessionId) {
-      return { status: 'error', message: 'session_not_found' }
-    }
-    return { status: this.status }
-  }
-
-  async startPhoneLogin(phone) {
-    this.status = 'loading'
-    this.log('Запрос SMS-кода для входа')
-    const result = await startPhoneLogin(phone)
-    this.log('SMS-код отправлен')
-    return result
-  }
-
-  async confirmPhoneLogin(sessionId, code) {
-    this.status = 'loading'
-    this.log('Подтверждение SMS-кода')
-    const result = await confirmPhoneLogin(sessionId, code)
-    if (result?.storage) {
-      this.session = result.storage
-      this.status = 'ok'
-      this.log('Авторизация по телефону успешна')
-    }
-    return result
-  }
-
-  async fetchStocksReport() {
-    if (!this.session) {
-      this.log('Нет активной сессии для парсинга отчета', 'error')
-      return { status: 'error', message: 'no_session', rows: [], logs: this.logs }
-    }
-
-    this.log('Открываем отчет по остаткам')
-    const { browser, page } = await this.manager.openWithStorage(this.session)
-    try {
-      await page.goto('https://seller.wildberries.ru/', { wait_until: 'load' })
+      logs.push(log('Открываем отчет по остаткам'))
       await page.goto('https://seller.wildberries.ru/analytics/stock-report', { wait_until: 'load' })
-
-      const table = page.locator('table')
-      await table.first().wait_for({ timeout: 15000 })
-      const rows = await page.evaluate(() => {
-        const data = []
-        const table = document.querySelector('table')
-        if (!table) return data
-        const body = table.querySelector('tbody')
-        if (!body) return data
-        for (const tr of Array.from(body.querySelectorAll('tr'))) {
-          const cells = Array.from(tr.querySelectorAll('td')).map((td) => td.textContent?.trim() || '')
-          if (cells.length > 0) data.push(cells)
+      await page.wait_for_timeout(1000)
+      const rows = []
+      let hasNext = true
+      while (hasNext) {
+        const pageRows = await page.evaluate(() => {
+          const table = document.querySelector('table')
+          if (!table) return []
+          const body = table.querySelector('tbody')
+          if (!body) return []
+          return Array.from(body.querySelectorAll('tr')).map((tr) =>
+            Array.from(tr.querySelectorAll('td')).map((td) => td.textContent?.trim() || ''),
+          )
+        })
+        rows.push(...pageRows)
+        const nextBtn = await page.locator('button:has-text("Далее"), button[aria-label="Next"]').first()
+        if (await nextBtn.count()) {
+          const disabled = await nextBtn.get_attribute('disabled')
+          if (disabled != null) {
+            hasNext = false
+          } else {
+            await nextBtn.click()
+            await page.wait_for_timeout(800)
+          }
+        } else {
+          hasNext = false
         }
-        return data
-      })
-      this.log(`Строк отчёта: ${rows.length}`)
-      return { status: 'ok', rows, logs: this.logs }
+      }
+      logs.push(log(`Получено строк: ${rows.length}`))
+      return { status: 'ok', rows, logs }
     } catch (e) {
-      this.log(`Ошибка отчёта: ${String(e?.message ?? e)}`, 'error')
-      return { status: 'error', message: 'report_failed', rows: [], logs: this.logs }
+      logs.push(log(`Ошибка отчета: ${String(e?.message ?? e)}`))
+      return { status: 'error', message: 'stocks_failed', rows: [], logs }
     } finally {
       await browser.close()
     }
   }
 
   async executeTransfers(tasks) {
-    if (!this.session) {
-      this.log('Нет активной сессии для отправки заявок', 'error')
-      return { status: 'error', message: 'no_session', results: [], logs: this.logs }
-    }
-    const { browser, page } = await this.manager.openWithStorage(this.session)
+    const { browser, page } = await this.withSessionPage()
+    const logs = []
     const results = []
     try {
-      await page.goto('https://seller.wildberries.ru/', { wait_until: 'load' })
       await page.goto('https://seller.wildberries.ru/analytics/stock-report', { wait_until: 'load' })
-
-      for (const task of tasks || []) {
+      for (const task of tasks) {
         try {
-          const action = page.locator('button:has-text("Перераспределить")')
-          if (await action.count()) await action.first().click()
-          const skuInput = page.locator('input[name="sku"], input[placeholder*="Артикул"]')
-          if (await skuInput.count()) await skuInput.first().fill(String(task.skuKey))
-          const qtyInput = page.locator('input[name="qty"], input[placeholder*="Колич"]')
-          if (await qtyInput.count()) await qtyInput.first().fill(String(task.qty))
-          const fromSelect = page.locator('select[name="fromWarehouse"]')
-          if (await fromSelect.count()) await fromSelect.first().select_option(String(task.fromWarehouse))
-          const toSelect = page.locator('select[name="toWarehouse"]')
-          if (await toSelect.count()) await toSelect.first().select_option(String(task.toWarehouse))
-          const submit = page.locator('button[type="submit"], button:has-text("Переместить")')
-          if (await submit.count()) await submit.first().click()
+          logs.push(log(`Запуск задачи ${task.skuKey}`))
+          const openBtn = page.locator('button:has-text("Перераспределить")').first()
+          if (await openBtn.count()) await openBtn.click()
+          const skuInput = page.locator('input[placeholder*="Артикул"], input[name="sku"]').first()
+          if (await skuInput.count()) await skuInput.fill(String(task.skuKey))
+          const qtyInput = page.locator('input[placeholder*="Колич"], input[name="qty"]').first()
+          if (await qtyInput.count()) await qtyInput.fill(String(task.qty))
+          const fromSelect = page.locator('select[name="fromWarehouse"]').first()
+          if (await fromSelect.count()) await fromSelect.select_option(String(task.fromWarehouse))
+          const toSelect = page.locator('select[name="toWarehouse"]').first()
+          if (await toSelect.count()) await toSelect.select_option(String(task.toWarehouse))
+          const submit = page.locator('button:has-text("Переместить"), button[type="submit"]').first()
+          if (await submit.count()) await submit.click()
           await page.wait_for_timeout(1200)
-          results.push({ ...task, status: 'sent' })
-          this.log(`Заявка отправлена: ${task.skuKey}`)
+          results.push({ ...task, status: 'success' })
+          logs.push(log(`Успешно: ${task.skuKey}`))
         } catch (e) {
           results.push({ ...task, status: 'error', message: String(e?.message ?? e) })
-          this.log(`Ошибка заявки: ${task.skuKey}`, 'error')
+          logs.push(log(`Ошибка: ${task.skuKey}`))
         }
       }
-      return { status: 'ok', results, logs: this.logs }
+      return { status: 'ok', results, logs }
     } finally {
       await browser.close()
     }

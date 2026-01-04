@@ -56,6 +56,13 @@ app.post('/api/stock-transfer/manual/start', async (_req, res) => {
   }
 })
 
+app.get('/api/stock-transfer/manual/status', (req, res) => {
+  const sessionId = String(req.query.sessionId || '')
+  if (!sessionId) return res.status(400).json({ error: 'session_required' })
+  const result = stockTransferService.getManualStatus(sessionId)
+  res.json(result)
+})
+
 app.post('/api/stock-transfer/phone/start', async (req, res) => {
   try {
     const { phone } = req.body || {}

@@ -13,7 +13,7 @@ export class BrowserManager {
     return { browser, context, page }
   }
 
-  async openManualLogin({ timeoutMs = 180000 } = {}) {
+  async openManualLogin({ timeoutMs = 180000, onSuccess } = {}) {
     this.logger.info('[BrowserManager] запуск ручного входа')
     const browser = await chromium.launch({ headless: false })
     const context = await browser.new_context()
@@ -24,6 +24,7 @@ export class BrowserManager {
       await page.wait_for_selector(authSelector, { timeout: timeoutMs })
       const storage = await context.storage_state()
       this.logger.info('[BrowserManager] ручной вход подтвержден')
+      if (onSuccess) await onSuccess(storage)
       return { status: 'ok', storage }
     } catch (e) {
       this.logger.error('[BrowserManager] ручной вход не подтвержден', e)

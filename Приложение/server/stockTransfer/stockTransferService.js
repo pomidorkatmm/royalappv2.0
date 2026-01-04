@@ -7,6 +7,7 @@ export class StockTransferService {
     this.session = null
     this.status = 'idle'
     this.logs = []
+    this.manualSessionId = null
   }
 
   log(message, level = 'info') {
@@ -36,16 +37,32 @@ export class StockTransferService {
     this.status = 'loading'
     this.log('Открываем браузер для ручного входа')
     try {
-      const result = await this.manager.openManualLogin({ timeoutMs: 180000 })
-      this.session = result.storage
-      this.status = 'ok'
-      this.log('Авторизация вручную подтверждена')
-      return { status: 'ok' }
+      const manualId = `${Date.now()}_${Math.random().toString(16).slice(2)}`
+      this.manualSessionId = manualId
+      this.manager.openManualLogin({
+        timeoutMs: 180000,
+        onSuccess: async (storage) => {
+          this.session = storage
+          this.status = 'ok'
+          this.log('Авторизация вручную подтверждена')
+        },
+      }).catch((e) => {
+        this.status = 'error'
+        this.log(`Ошибка ручного входа: ${String(e?.message ?? e)}`, 'error')
+      })
+      return { status: 'pending', sessionId: manualId }
     } catch (e) {
       this.status = 'error'
       this.log(`Ошибка ручного входа: ${String(e?.message ?? e)}`, 'error')
       throw e
     }
+  }
+
+  getManualStatus(sessionId) {
+    if (!this.manualSessionId || this.manualSessionId !== sessionId) {
+      return { status: 'error', message: 'session_not_found' }
+    }
+    return { status: this.status }
   }
 
   async startPhoneLogin(phone) {

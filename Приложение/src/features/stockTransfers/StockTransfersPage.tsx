@@ -69,6 +69,7 @@ export default function StockTransfersPage({
   const [smsStatus, setSmsStatus] = useState('Ожидание запроса SMS-кода')
   const [smsCooldownUntil, setSmsCooldownUntil] = useState<number | null>(null)
   const [manualStatus, setManualStatus] = useState('Ожидание входа')
+  const [manualSessionId, setManualSessionId] = useState<string | null>(null)
   const [logs, setLogs] = useState<Array<{ ts: string; level: string; message: string }>>([])
   const [plan, setPlan] = useState<Array<{ skuKey: string; fromWarehouse: string; toWarehouse: string; qty: number }>>([])
 
@@ -245,13 +246,33 @@ export default function StockTransfersPage({
       const r = await fetch('/api/stock-transfer/manual/start', { method: 'POST' })
       const data = await r.json().catch(() => ({}))
       if (!r.ok) throw new Error(data?.error || 'manual_login_failed')
-      setManualStatus('Авторизация прошла успешно')
-      push('Авторизация прошла успешно')
+      setManualSessionId(data.sessionId ?? null)
+      setManualStatus('Ожидание входа')
+      push('Откройте браузер и завершите вход')
     } catch (e: any) {
       setManualStatus(`Ошибка: ${String(e?.message ?? e)}`)
       push(`Ошибка авторизации: ${String(e?.message ?? e)}`)
     }
   }
+
+  useEffect(() => {
+    if (!manualSessionId) return
+    const t = window.setInterval(async () => {
+      const r = await fetch(`/api/stock-transfer/manual/status?sessionId=${encodeURIComponent(manualSessionId)}`)
+      const data = await r.json().catch(() => ({}))
+      if (data.status === 'ok') {
+        setManualStatus('Авторизация прошла успешно')
+        push('Авторизация прошла успешно')
+        setManualSessionId(null)
+        window.clearInterval(t)
+      } else if (data.status === 'error') {
+        setManualStatus(`Ошибка: ${data.message || 'manual_login_failed'}`)
+        setManualSessionId(null)
+        window.clearInterval(t)
+      }
+    }, 3000)
+    return () => window.clearInterval(t)
+  }, [manualSessionId, push])
 
   async function requestSmsCode() {
     if (!phone) return

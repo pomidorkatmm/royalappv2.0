@@ -571,30 +571,6 @@ a { color: inherit; }
   gap: 10px;
 }
 
-.transfer-table {
-  display: grid;
-  gap: 8px;
-}
-
-.transfer-row {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: 120px 1fr repeat(auto-fit, minmax(120px, 1fr)) 1fr 140px;
-  align-items: center;
-  padding: 8px 10px;
-  border-radius: 12px;
-  border: 1px solid rgba(0,0,0,0.08);
-  background: #fff;
-}
-
-.transfer-head {
-  font-weight: 700;
-  background: #fafafa;
-}
-
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-}
 
 .ab-testHeader {
   display: flex;

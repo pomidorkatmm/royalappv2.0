@@ -693,13 +693,6 @@ function AppInner() {
         <AbTestsPage sellerToken={sellerToken} adsToken={adsToken || null} openApiStrategyId={openApiStrategyId} />
       </div>
 
-      <div className={`tabPane ${tab === 'stockTransfers' ? '' : 'isHidden'}`}>
-        <StockTransfersPage
-          accountId={activeAccount?.id ?? 'default'}
-          sellerToken={sellerToken}
-          openApiStrategyId={openApiStrategyId}
-        />
-      </div>
     </div>
   )
 }

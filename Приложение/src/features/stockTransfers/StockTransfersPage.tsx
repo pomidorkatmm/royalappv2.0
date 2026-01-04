@@ -66,6 +66,8 @@ export default function StockTransfersPage({
   const [phone, setPhone] = useState('')
   const [phoneCode, setPhoneCode] = useState('')
   const [phoneSession, setPhoneSession] = useState<string | null>(null)
+  const [smsStatus, setSmsStatus] = useState('Ожидание запроса SMS-кода')
+  const [smsCooldownUntil, setSmsCooldownUntil] = useState<number | null>(null)
   const [logs, setLogs] = useState<Array<{ ts: string; level: string; message: string }>>([])
   const [plan, setPlan] = useState<Array<{ skuKey: string; fromWarehouse: string; toWarehouse: string; qty: number }>>([])
 
@@ -238,6 +240,11 @@ export default function StockTransfersPage({
 
   async function requestSmsCode() {
     if (!phone) return
+    const now = Date.now()
+    if (smsCooldownUntil && now < smsCooldownUntil) {
+      push('Повторный запрос доступен позже')
+      return
+    }
     setLoginStatus('loading')
     try {
       const r = await fetch('/api/stock-transfer/phone/start', {
@@ -250,9 +257,12 @@ export default function StockTransfersPage({
       if (!r.ok) throw new Error(data?.error || 'phone_start_failed')
       setPhoneSession(data.sessionId)
       setLoginStatus('idle')
+      setSmsStatus('SMS-код отправлен')
+      setSmsCooldownUntil(Date.now() + 60_000)
       push('Код отправлен')
     } catch (e: any) {
       setLoginStatus('error')
+      setSmsStatus(`Ошибка: ${String(e?.message ?? e)}`)
       push(`Ошибка запроса кода: ${String(e?.message ?? e)}`)
     }
   }
@@ -270,9 +280,11 @@ export default function StockTransfersPage({
       const data = text ? JSON.parse(text) : {}
       if (!r.ok) throw new Error(data?.error || 'phone_confirm_failed')
       setLoginStatus('ok')
+      setSmsStatus('Авторизация прошла успешно')
       push('Авторизация прошла успешно')
     } catch (e: any) {
       setLoginStatus('error')
+      setSmsStatus(`Ошибка: ${String(e?.message ?? e)}`)
       push(`Ошибка кода: ${String(e?.message ?? e)}`)
     }
   }
@@ -340,6 +352,12 @@ export default function StockTransfersPage({
           <button className="btn primary" onClick={confirmSmsCode}>
             Войти
           </button>
+          <button className="btn" onClick={requestSmsCode}>
+            Запросить снова
+          </button>
+        </div>
+        <div className="small muted" style={{ marginTop: 6 }}>
+          {smsStatus}
         </div>
         <div className="row" style={{ marginTop: 8 }}>
           <input className="input" placeholder="Логин" value={login} onChange={(e) => setLogin(e.target.value)} />

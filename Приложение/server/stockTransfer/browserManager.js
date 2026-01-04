@@ -6,6 +6,13 @@ export class BrowserManager {
     this.logger = logger
   }
 
+  async openWithStorage(storage) {
+    const browser = await chromium.launch({ headless: this.headless })
+    const context = await browser.new_context({ storage_state: storage })
+    const page = await context.new_page()
+    return { browser, context, page }
+  }
+
   async login({ login, password }) {
     this.logger.info('[BrowserManager] старт логина')
     const browser = await chromium.launch({ headless: this.headless })

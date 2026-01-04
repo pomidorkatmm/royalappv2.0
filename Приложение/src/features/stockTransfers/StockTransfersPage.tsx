@@ -63,7 +63,11 @@ export default function StockTransfersPage({
   const [login, setLogin] = useState('')
   const [password, setPassword] = useState('')
   const [loginStatus, setLoginStatus] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle')
+  const [phone, setPhone] = useState('')
+  const [phoneCode, setPhoneCode] = useState('')
+  const [phoneSession, setPhoneSession] = useState<string | null>(null)
   const [logs, setLogs] = useState<Array<{ ts: string; level: string; message: string }>>([])
+  const [plan, setPlan] = useState<Array<{ skuKey: string; fromWarehouse: string; toWarehouse: string; qty: number }>>([])
 
   function loadCache() {
     try {
@@ -171,6 +175,14 @@ export default function StockTransfersPage({
       })
     }
     setSuggestions(recs)
+    setPlan(
+      recs.map((r) => ({
+        skuKey: r.skuKey,
+        fromWarehouse: r.fromWarehouse,
+        toWarehouse: r.toWarehouse,
+        qty: r.qty,
+      })),
+    )
   }, [tableRows, warehouses])
 
   function enqueueTransfer(suggestion: TransferSuggestion) {
@@ -224,6 +236,45 @@ export default function StockTransfersPage({
     }
   }
 
+  async function requestSmsCode() {
+    if (!phone) return
+    setLoginStatus('loading')
+    try {
+      const r = await fetch('/api/stock-transfer/phone/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      })
+      const data = await r.json()
+      if (!r.ok) throw new Error(data?.error || 'phone_start_failed')
+      setPhoneSession(data.sessionId)
+      setLoginStatus('idle')
+      push('Код отправлен')
+    } catch (e: any) {
+      setLoginStatus('error')
+      push(`Ошибка запроса кода: ${String(e?.message ?? e)}`)
+    }
+  }
+
+  async function confirmSmsCode() {
+    if (!phoneSession || !phoneCode) return
+    setLoginStatus('loading')
+    try {
+      const r = await fetch('/api/stock-transfer/phone/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: phoneSession, code: phoneCode }),
+      })
+      const data = await r.json()
+      if (!r.ok) throw new Error(data?.error || 'phone_confirm_failed')
+      setLoginStatus('ok')
+      push('Авторизация прошла успешно')
+    } catch (e: any) {
+      setLoginStatus('error')
+      push(`Ошибка кода: ${String(e?.message ?? e)}`)
+    }
+  }
+
   async function loadStocksFromPortal() {
     try {
       const r = await fetch('/api/stock-transfer/stocks')
@@ -241,7 +292,7 @@ export default function StockTransfersPage({
       const r = await fetch('/api/stock-transfer/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tasks: suggestions }),
+        body: JSON.stringify({ tasks: plan }),
       })
       const data = await r.json()
       setLogs(data.logs ?? [])
@@ -277,7 +328,17 @@ export default function StockTransfersPage({
 
       <div className="card" style={{ background: '#fafafa' }}>
         <div style={{ fontWeight: 700 }}>Авторизация в Wildberries Seller</div>
-        <div className="small muted">Войдите, чтобы парсить отчет и отправлять заявки через интерфейс WB.</div>
+        <div className="small muted">Войдите по телефону или логину, чтобы парсить отчет и отправлять заявки.</div>
+        <div className="row" style={{ marginTop: 8 }}>
+          <input className="input" placeholder="Номер телефона" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          <button className="btn" onClick={requestSmsCode}>
+            Запросить SMS-код
+          </button>
+          <input className="input" placeholder="Код из SMS" value={phoneCode} onChange={(e) => setPhoneCode(e.target.value)} />
+          <button className="btn primary" onClick={confirmSmsCode}>
+            Войти
+          </button>
+        </div>
         <div className="row" style={{ marginTop: 8 }}>
           <input className="input" placeholder="Логин" value={login} onChange={(e) => setLogin(e.target.value)} />
           <input className="input" placeholder="Пароль" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
@@ -329,6 +390,41 @@ export default function StockTransfersPage({
             </div>
           )
         })}
+      </div>
+
+      <div style={{ height: 16 }} />
+
+      <div className="card" style={{ background: '#fafafa' }}>
+        <strong>План перемещений</strong>
+        <div className="small muted">Проверьте и отредактируйте план перед отправкой.</div>
+        <div style={{ height: 8 }} />
+        <div className="transfer-table">
+          <div className="transfer-row transfer-head">
+            <div>SKU</div>
+            <div>Откуда</div>
+            <div>Куда</div>
+            <div>Количество</div>
+          </div>
+          {plan.map((item, idx) => (
+            <div key={`${item.skuKey}_${idx}`} className="transfer-row">
+              <div className="mono">{item.skuKey}</div>
+              <div>{item.fromWarehouse}</div>
+              <div>{item.toWarehouse}</div>
+              <div>
+                <input
+                  className="input"
+                  type="number"
+                  value={item.qty}
+                  onChange={(e) => {
+                    const next = Number(e.target.value)
+                    setPlan((prev) => prev.map((p, i) => (i === idx ? { ...p, qty: next } : p)))
+                  }}
+                />
+              </div>
+            </div>
+          ))}
+          {plan.length === 0 && <div className="small muted">План пуст.</div>}
+        </div>
       </div>
 
       <div style={{ height: 16 }} />

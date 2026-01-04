@@ -1,4 +1,5 @@
 import { BrowserManager } from './browserManager.js'
+import { startPhoneLogin, confirmPhoneLogin } from './phoneAuth.js'
 
 export class StockTransferService {
   constructor() {
@@ -31,6 +32,26 @@ export class StockTransferService {
     }
   }
 
+  async startPhoneLogin(phone) {
+    this.status = 'loading'
+    this.log('Запрос SMS-кода для входа')
+    const result = await startPhoneLogin(phone)
+    this.log('SMS-код отправлен')
+    return result
+  }
+
+  async confirmPhoneLogin(sessionId, code) {
+    this.status = 'loading'
+    this.log('Подтверждение SMS-кода')
+    const result = await confirmPhoneLogin(sessionId, code)
+    if (result?.storage) {
+      this.session = result.storage
+      this.status = 'ok'
+      this.log('Авторизация по телефону успешна')
+    }
+    return result
+  }
+
   async fetchStocksReport() {
     if (!this.session) {
       this.log('Нет активной сессии для парсинга отчета', 'error')
@@ -38,14 +59,32 @@ export class StockTransferService {
     }
 
     this.log('Открываем отчет по остаткам')
-    // Здесь должна быть реальная автоматизация страницы:
-    // 1) открыть Аналитика → Отчёт по остаткам
-    // 2) дождаться таблицы и спарсить данные
-    // Пока возвращаем заглушку, но сохраняем структуру.
-    return {
-      status: 'ok',
-      rows: [],
-      logs: this.logs,
+    const { browser, page } = await this.manager.openWithStorage(this.session)
+    try {
+      await page.goto('https://seller.wildberries.ru/', { wait_until: 'load' })
+      await page.goto('https://seller.wildberries.ru/analytics/stock-report', { wait_until: 'load' })
+
+      const table = page.locator('table')
+      await table.first().wait_for({ timeout: 15000 })
+      const rows = await page.evaluate(() => {
+        const data = []
+        const table = document.querySelector('table')
+        if (!table) return data
+        const body = table.querySelector('tbody')
+        if (!body) return data
+        for (const tr of Array.from(body.querySelectorAll('tr'))) {
+          const cells = Array.from(tr.querySelectorAll('td')).map((td) => td.textContent?.trim() || '')
+          if (cells.length > 0) data.push(cells)
+        }
+        return data
+      })
+      this.log(`Строк отчёта: ${rows.length}`)
+      return { status: 'ok', rows, logs: this.logs }
+    } catch (e) {
+      this.log(`Ошибка отчёта: ${String(e?.message ?? e)}`, 'error')
+      return { status: 'error', message: 'report_failed', rows: [], logs: this.logs }
+    } finally {
+      await browser.close()
     }
   }
 
@@ -54,11 +93,37 @@ export class StockTransferService {
       this.log('Нет активной сессии для отправки заявок', 'error')
       return { status: 'error', message: 'no_session', results: [], logs: this.logs }
     }
-    const results = (tasks || []).map((task) => ({
-      ...task,
-      status: 'queued',
-    }))
-    this.log(`Поставлено в очередь задач: ${results.length}`)
-    return { status: 'ok', results, logs: this.logs }
+    const { browser, page } = await this.manager.openWithStorage(this.session)
+    const results = []
+    try {
+      await page.goto('https://seller.wildberries.ru/', { wait_until: 'load' })
+      await page.goto('https://seller.wildberries.ru/analytics/stock-report', { wait_until: 'load' })
+
+      for (const task of tasks || []) {
+        try {
+          const action = page.locator('button:has-text("Перераспределить")')
+          if (await action.count()) await action.first().click()
+          const skuInput = page.locator('input[name="sku"], input[placeholder*="Артикул"]')
+          if (await skuInput.count()) await skuInput.first().fill(String(task.skuKey))
+          const qtyInput = page.locator('input[name="qty"], input[placeholder*="Колич"]')
+          if (await qtyInput.count()) await qtyInput.first().fill(String(task.qty))
+          const fromSelect = page.locator('select[name="fromWarehouse"]')
+          if (await fromSelect.count()) await fromSelect.first().select_option(String(task.fromWarehouse))
+          const toSelect = page.locator('select[name="toWarehouse"]')
+          if (await toSelect.count()) await toSelect.first().select_option(String(task.toWarehouse))
+          const submit = page.locator('button[type="submit"], button:has-text("Переместить")')
+          if (await submit.count()) await submit.first().click()
+          await page.wait_for_timeout(1200)
+          results.push({ ...task, status: 'sent' })
+          this.log(`Заявка отправлена: ${task.skuKey}`)
+        } catch (e) {
+          results.push({ ...task, status: 'error', message: String(e?.message ?? e) })
+          this.log(`Ошибка заявки: ${task.skuKey}`, 'error')
+        }
+      }
+      return { status: 'ok', results, logs: this.logs }
+    } finally {
+      await browser.close()
+    }
   }
 }

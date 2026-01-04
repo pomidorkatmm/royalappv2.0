@@ -47,6 +47,28 @@ app.post('/api/stock-transfer/login', async (req, res) => {
   }
 })
 
+app.post('/api/stock-transfer/phone/start', async (req, res) => {
+  try {
+    const { phone } = req.body || {}
+    if (!phone) return res.status(400).json({ error: 'phone_required' })
+    const result = await stockTransferService.startPhoneLogin(phone)
+    res.json(result)
+  } catch (e) {
+    res.status(500).json({ error: 'phone_start_failed', detail: String(e?.message ?? e) })
+  }
+})
+
+app.post('/api/stock-transfer/phone/confirm', async (req, res) => {
+  try {
+    const { sessionId, code } = req.body || {}
+    if (!sessionId || !code) return res.status(400).json({ error: 'session_or_code_required' })
+    const result = await stockTransferService.confirmPhoneLogin(sessionId, code)
+    res.json(result)
+  } catch (e) {
+    res.status(500).json({ error: 'phone_confirm_failed', detail: String(e?.message ?? e) })
+  }
+})
+
 app.get('/api/stock-transfer/stocks', async (_req, res) => {
   try {
     const result = await stockTransferService.fetchStocksReport()

@@ -708,6 +708,10 @@ export default function App() {
   const [ready, setReady] = useState(false)
   const [phone, setPhone] = useState(() => localStorage.getItem('wb_phone_auth') || '')
   const [phoneAuth, setPhoneAuth] = useState(() => Boolean(localStorage.getItem('wb_phone_auth_ok')))
+  const [phoneSession, setPhoneSession] = useState<string | null>(null)
+  const [phoneCode, setPhoneCode] = useState('')
+  const [phoneLoading, setPhoneLoading] = useState(false)
+  const [phoneError, setPhoneError] = useState('')
   return (
     <ToastProvider>
       {!ready && <SplashScreen ms={2000} onDone={() => setReady(true)} />}
@@ -724,16 +728,52 @@ export default function App() {
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
             />
+            {phoneSession && (
+              <input
+                className="input"
+                placeholder="Код из SMS"
+                value={phoneCode}
+                onChange={(e) => setPhoneCode(e.target.value)}
+              />
+            )}
+            {phoneError && <div className="small error">{phoneError}</div>}
             <button
               className="btn primary"
-              onClick={() => {
+              disabled={phoneLoading}
+              onClick={async () => {
                 if (phone.trim().length < 10) return
-                localStorage.setItem('wb_phone_auth', phone.trim())
-                localStorage.setItem('wb_phone_auth_ok', '1')
-                setPhoneAuth(true)
+                setPhoneLoading(true)
+                setPhoneError('')
+                try {
+                  if (!phoneSession) {
+                    const r = await fetch('/api/wb/login/start', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ phone: phone.trim() }),
+                    })
+                    const data = await r.json()
+                    if (!r.ok) throw new Error(data?.error || 'start_failed')
+                    setPhoneSession(data.sessionId)
+                    localStorage.setItem('wb_phone_auth', phone.trim())
+                    return
+                  }
+                  const r = await fetch('/api/wb/login/confirm', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionId: phoneSession, code: phoneCode.trim() }),
+                  })
+                  const data = await r.json()
+                  if (!r.ok) throw new Error(data?.error || 'confirm_failed')
+                  localStorage.setItem('wb_phone_auth_ok', '1')
+                  setPhoneAuth(true)
+                } catch (e) {
+                  setPhoneError(String(e?.message ?? e))
+                } finally {
+                  setPhoneLoading(false)
+                }
               }}
             >
-              Подключиться по номеру телефона
+              {phoneSession ? 'Подтвердить код' : 'Подключиться по номеру телефона'}
             </button>
           </div>
         </div>

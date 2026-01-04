@@ -92,6 +92,11 @@ export default function AbTestsPage({
     return msg.includes('prices and discounts are already set')
   }
 
+  function isTaskAlreadyExistsError(e: any) {
+    const msg = String(e?.detail ?? e?.message ?? e)
+    return msg.toLowerCase().includes('task already exists')
+  }
+
   async function loadProductsPage(reset: boolean) {
     setProductsLoading(true)
     setProductsError('')
@@ -389,7 +394,9 @@ export default function AbTestsPage({
     try {
       await applyVariant(sellerToken, test, variants[0], openApiStrategyId)
     } catch (e: any) {
-      if (type === 'price' && isPriceAlreadySetError(e)) {
+      if (isTaskAlreadyExistsError(e)) {
+        push('Задача уже существует, продолжаем тест')
+      } else if (type === 'price' && isPriceAlreadySetError(e)) {
         push('Вариант цены уже установлен, продолжаем тест')
       } else {
         push(`Не удалось применить вариант: ${String(e?.detail ?? e?.message ?? e)}`)
@@ -463,7 +470,10 @@ export default function AbTestsPage({
       await applyVariant(sellerToken, current, next, openApiStrategyId)
       current.activeVariantId = next.id
     } catch (e: any) {
-      if (current.type === 'price' && isPriceAlreadySetError(e)) {
+      if (isTaskAlreadyExistsError(e)) {
+        current.activeVariantId = next.id
+        push('Задача уже существует, переключаемся без ошибки')
+      } else if (current.type === 'price' && isPriceAlreadySetError(e)) {
         current.activeVariantId = next.id
         push('Вариант цены уже установлен, переключаемся без ошибки')
       } else {
